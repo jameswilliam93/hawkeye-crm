@@ -1,5 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
-import { supabase } from "./supabase";
+import { useState, useMemo } from "react";
 
 // ── Palette & helpers ────────────────────────────────────────────────
 const STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
