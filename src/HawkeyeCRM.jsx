@@ -310,7 +310,6 @@ export default function HawkeyeCRM({ session }){
         />
       )}
       {toastMsg&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#185FA5",color:"white",padding:"8px 18px",borderRadius:20,fontSize:12,fontWeight:500,zIndex:2000,pointerEvents:"none"}}>{toastMsg}</div>}
-      {toastMsg&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#185FA5",color:"white",padding:"8px 18px",borderRadius:20,fontSize:12,fontWeight:500,zIndex:2000,pointerEvents:"none"}}>{toastMsg}</div>}
     </div>
   );
 }
