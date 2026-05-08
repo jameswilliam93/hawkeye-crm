@@ -108,7 +108,6 @@ function rowToDbRecord(row) {
 // ── Styles (matching HawkeyeCRM exactly) ─────────────────────────────
 const btnStyle = { fontSize:12, padding:"6px 12px", borderRadius:7, border:"0.5px solid var(--color-border-secondary)", background:"var(--color-background-primary)", color:"var(--color-text-primary)", cursor:"pointer", fontFamily:"inherit" };
 const btnPrimary = { ...btnStyle, background:"#185FA5", color:"white", border:"none" };
-const btnDanger  = { ...btnStyle, color:"#A32D2D", borderColor:"#F09595" };
 
 export default function ImportCSVModal({ onClose, supabase, onImportComplete }) {
   const [step, setStep]           = useState("drop");   // drop | preview | importing | done
