@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
+import ImportCSVModal from "./ImportCSVModal";
 
 // ── Palette & helpers ────────────────────────────────────────────────
 const STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
