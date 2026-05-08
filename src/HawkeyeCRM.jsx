@@ -298,7 +298,18 @@ export default function HawkeyeCRM({ session }){
       {modal?.type==="editContact"&&<AddContactModal edit contact={modal.contact} onClose={closeModal} onSave={(d)=>{updateContact(modal.contact.id,d);closeModal();toast("Saved");}}/>}
       {modal?.type==="winloss"&&<WinLossModal stage={modal.stage} onClose={closeModal} onSave={(reason)=>{updateContact(modal.id,{stage:modal.stage,lossReason:reason});closeModal();toast(`Moved to ${modal.stage}`);}}/>}
       {modal?.type==="template"&&<TemplateModal template={modal.template} onClose={closeModal} onSave={(t)=>{saveTemplate(t);closeModal();}}/>}
-      {modal?.type==="import"&&<Modal onClose={closeModal}><div style={{textAlign:"center",padding:"20px 0"}}><div style={{fontSize:15,fontWeight:500,marginBottom:8}}>Import contacts from CSV</div><div style={{fontSize:12,color:"var(--color-text-secondary)",marginBottom:16}}>CSV should have columns: Company, Contact Name, Title, Email, Phone, Stage, Source, Tags</div><div style={{border:"2px dashed var(--color-border-secondary)",borderRadius:8,padding:"32px 16px",color:"var(--color-text-tertiary)",fontSize:12}}>Drop CSV file here or click to browse</div><button style={{...btnStyle,marginTop:16}} onClick={closeModal}>Close</button></div></Modal>}
+{modal?.type==="import" && (
+        <ImportCSVModal
+          onClose={closeModal}
+          supabase={supabase}
+          onImportComplete={(count) => {
+            loadData();
+            toast(`${count} contacts imported`);
+            closeModal();
+          }}
+        />
+      )}
+      {toastMsg&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#185FA5",color:"white",padding:"8px 18px",borderRadius:20,fontSize:12,fontWeight:500,zIndex:2000,pointerEvents:"none"}}>{toastMsg}</div>}
       {toastMsg&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:"#185FA5",color:"white",padding:"8px 18px",borderRadius:20,fontSize:12,fontWeight:500,zIndex:2000,pointerEvents:"none"}}>{toastMsg}</div>}
     </div>
   );
