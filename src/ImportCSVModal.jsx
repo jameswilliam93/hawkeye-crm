@@ -203,7 +203,7 @@ export default function ImportCSVModal({ onClose, supabase, onImportComplete }) 
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background:"var(--color-background-primary)", borderRadius:12, border:"1px solid var(--color-border-tertiary)", boxShadow:"0 8px 40px rgba(0,0,0,0.18)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:"#ffffff", borderRadius:12, border:"1px solid #D0D0D0", boxShadow:"0 12px 60px rgba(0,0,0,0.35)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}><div onClick={e => e.stopPropagation()} style={{ background:"#ffffff", borderRadius:12, border:"1px solid #D0D0D0", boxShadow:"0 12px 60px rgba(0,0,0,0.35)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}>
 
         {/* ── Step 1: Drop zone ── */}
         {step === "drop" && (
