@@ -142,6 +142,8 @@ const POSTCODE_AREA_TO_REGION = {
   BT:"Northern Ireland",
 };
 
+const UK_REGIONS = ["North East England","North West England","Yorkshire and The Humber","East Midlands","West Midlands","East of England","London","South East England","South West England","Wales","Scotland","Northern Ireland"];
+
 function regionFromLocation(location){
   if(!location) return null;
   const match = location.toUpperCase().match(/\b([A-Z]{1,2})\d/);
@@ -201,6 +203,7 @@ export default function HawkeyeCRM({ session }){
   const [filterStage, setFilterStage] = useState("");
   const [filterSource, setFilterSource] = useState("");
   const [filterSize, setFilterSize] = useState("");
+  const [filterRegion, setFilterRegion] = useState("");
   const [filterMine, setFilterMine] = useState(false);
   const [contactSort, setContactSort] = useState("newest");
   const [selected, setSelected] = useState([]);
@@ -353,8 +356,9 @@ export default function HawkeyeCRM({ session }){
     const haystack = [c.company,c.contactName,c.industry,c.location,c.currentSupplier,...(c.tags||[]),...(c.frameworks||[])].join(" ").toLowerCase();
     const matchQ = !q||haystack.includes(q);
     const matchMine = !filterMine||c.assignedTo===session?.user?.email;
-    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine;
-  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterMine,contactSort,session]);
+    const matchRegion = !filterRegion||regionFromLocation(c.location)===filterRegion;
+    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine&&matchRegion;
+  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterRegion,filterMine,contactSort,session]);
 
   const exportCSV = (rows)=>{
     const headers = ["Company","Contact Name","Title","Email","Phone","LinkedIn","Location","Company Size","Website","Industry","Stage","Source","Current Supplier","Contract End","Frameworks","Tags"];
@@ -444,7 +448,7 @@ export default function HawkeyeCRM({ session }){
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
           {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts}/>}
-          {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
+          {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
           {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
           {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
           {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact} logTenderInterest={logTenderInterest}/>}
@@ -609,12 +613,18 @@ const CONTACT_SORTS = {
 
 function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
   const [sortBy,setSortBy]=useState("newest");
+  const [filterRegion,setFilterRegion]=useState("");
   const stalIds = new Set(stalContacts.map(c=>c.id));
+  const visible = filterRegion ? contacts.filter(c=>regionFromLocation(c.location)===filterRegion) : contacts;
   return (
     <div>
       {stalContacts.length>0&&<div style={{background:"#FAEEDA",border:"0.5px solid #EF9F27",borderRadius:8,padding:"8px 12px",marginBottom:12}}><span style={{fontSize:11,color:"#633806"}}>⚠ {stalContacts.length} contact{stalContacts.length>1?"s":""} not touched in 14+ days: {stalContacts.map(c=>c.company).join(", ")}</span></div>}
       {contacts.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts yet. Click "+ Add contact" to get started.</div>}
-      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:7,marginBottom:8}}>
+        <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={{...inputStyle,fontSize:11}}>
+          <option value="">All regions</option>
+          {UK_REGIONS.map(r=><option key={r}>{r}</option>)}
+        </select>
         <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...inputStyle,fontSize:11}}>
           <option value="newest">Sort: Newest added</option>
           <option value="oldest">Sort: Oldest added</option>
@@ -623,7 +633,7 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
       </div>
       <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:8}}>
         {STAGES.map(stage=>{
-          const cols=contacts.filter(c=>c.stage===stage).sort(PIPELINE_SORTS[sortBy]);
+          const cols=visible.filter(c=>c.stage===stage).sort(PIPELINE_SORTS[sortBy]);
           const {bg,color}=STAGE_STYLE[stage];
           return (
             <div key={stage} style={{minWidth:168,flexShrink:0}}>
@@ -651,7 +661,7 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
   );
 }
 
-function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
+function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
   const [groupByCompany,setGroupByCompany]=useState(false);
   const toggleSelect=(id)=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const allSelected=contacts.length>0&&contacts.every(c=>selected.includes(c.id));
@@ -676,6 +686,7 @@ function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filt
         <select value={filterStage} onChange={e=>setFilterStage(e.target.value)} style={inputStyle}><option value="">All stages</option>{STAGES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSource} onChange={e=>setFilterSource(e.target.value)} style={inputStyle}><option value="">All sources</option>{SOURCES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSize} onChange={e=>setFilterSize(e.target.value)} style={inputStyle}><option value="">All sizes</option>{["1-10","11-50","51-200","200+"].map(s=><option key={s}>{s}</option>)}</select>
+        <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={inputStyle}><option value="">All regions</option>{UK_REGIONS.map(r=><option key={r}>{r}</option>)}</select>
         <select value={contactSort} onChange={e=>setContactSort(e.target.value)} style={inputStyle}>
           <option value="newest">Sort: Newest added</option>
           <option value="oldest">Sort: Oldest added</option>
