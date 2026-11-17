@@ -249,6 +249,7 @@ export default function HawkeyeCRM({ session }){
       assigned_to: data.assignedTo||session?.user?.email||"You", follow_up_date: data.followUpDate||null,
       current_supplier: data.currentSupplier, contract_end: data.contractEnd,
       frameworks: data.frameworks||[], tags: data.tags||[], estimated_value: data.estimatedValue,
+      notes: data.notes||null,
     }]).select().single();
     if(error){ toast("Error adding contact"); return; }
     setContacts(cs=>[{...mapContact(row), activities:[]}, ...cs]);
@@ -310,6 +311,20 @@ export default function HawkeyeCRM({ session }){
       toast("Activity logged");
     }
     setNewActivity({type:"Email",note:"",date:""});
+  };
+
+  const logTenderInterest = async (contactId, tender)=>{
+    const today = new Date().toISOString().slice(0,10);
+    const closes = tender.deadline ? new Date(tender.deadline).toLocaleDateString("en-GB") : "n/a";
+    const note = `Matched to live tender: "${tender.title}" — ${tender.buyer} (${tender.region||"region n/a"}), closes ${closes}. ${tender.url}`;
+    const { data: row, error } = await supabase.from("activities").insert([{
+      contact_id: contactId, type: "Note", note, date: today, by: session?.user?.email||"You",
+    }]).select().single();
+    if(error){ toast("Error logging"); return; }
+    setContacts(cs=>cs.map(c=>c.id===contactId?{...c,activities:[mapActivity(row),...c.activities].sort((a,b)=>new Date(b.date)-new Date(a.date)),lastContacted:today}:c));
+    await supabase.from("contacts").update({last_contacted:today}).eq("id",contactId);
+    const contact = contacts.find(c=>c.id===contactId);
+    toast(`Tender flagged on ${contact?.company||"contact"}`);
   };
 
   const saveTemplate = async (data)=>{
@@ -432,7 +447,7 @@ export default function HawkeyeCRM({ session }){
           {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
           {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
           {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
-          {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact}/>}
+          {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact} logTenderInterest={logTenderInterest}/>}
           {view==="templates"&&<TemplatesView templates={templates} saveTemplate={saveTemplate} deleteTemplate={deleteTemplate} setModal={setModal}/>}
         </div>
       </div>
@@ -803,13 +818,14 @@ function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActiv
             </div>
           </div>
           <div style={cardStyle}>
-            <div style={{fontSize:10,fontWeight:500,color:"var(--color-text-secondary)",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.05em"}}>Supplier & Frameworks</div>
+            <div style={{fontSize:10,fontWeight:500,color:"var(--color-text-secondary)",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.05em"}}>Company Research</div>
+            {contact.notes && <div style={{fontSize:11,color:"var(--color-text-primary)",lineHeight:1.5,marginBottom:8,paddingBottom:8,borderBottom:"0.5px solid var(--color-border-tertiary)"}}>{contact.notes}</div>}
             {[{l:"Curr. supplier",v:contact.currentSupplier},{l:"Contract end",v:contact.contractEnd}].filter(x=>x.v).map(({l,v})=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"4px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",gap:8}}><span style={{fontSize:11,color:"var(--color-text-secondary)"}}>{l}</span><span style={{fontSize:11}}>{v}</span></div>
             ))}
             <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:8}}>
               {(contact.frameworks||[]).map(f=><span key={f} style={{fontSize:10,padding:"2px 7px",borderRadius:10,background:"#EEEDFE",color:"#3C3489"}}>{f}</span>)}
-              {(contact.frameworks||[]).length===0&&<span style={{fontSize:11,color:"var(--color-text-tertiary)"}}>No frameworks added</span>}
+              {(contact.frameworks||[]).length===0&&!contact.notes&&<span style={{fontSize:11,color:"var(--color-text-tertiary)"}}>No research or frameworks added yet</span>}
             </div>
           </div>
           <div style={cardStyle}>
@@ -874,7 +890,7 @@ function TemplatesView({templates,saveTemplate,deleteTemplate,setModal}){
 }
 
 function AddContactModal({onClose,onSave,prefillStage,edit,contact,currentUserEmail}){
-  const [form,setForm]=useState(contact||{company:"",contactName:"",title:"",email:"",phone:"",linkedin:"",location:"",companySize:"",website:"",stage:prefillStage||"New Lead",source:"Scraped",assignedTo:currentUserEmail||"You",followUpDate:"",currentSupplier:"",contractEnd:"",frameworks:[],tags:[],industry:"",estimatedValue:""});
+  const [form,setForm]=useState(contact||{company:"",contactName:"",title:"",email:"",phone:"",linkedin:"",location:"",companySize:"",website:"",stage:prefillStage||"New Lead",source:"Scraped",assignedTo:currentUserEmail||"You",followUpDate:"",currentSupplier:"",contractEnd:"",frameworks:[],tags:[],industry:"",estimatedValue:"",notes:""});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const toggleFW=(fw)=>set("frameworks",form.frameworks.includes(fw)?form.frameworks.filter(x=>x!==fw):[...form.frameworks,fw]);
   return (
@@ -893,6 +909,10 @@ function AddContactModal({onClose,onSave,prefillStage,edit,contact,currentUserEm
       <div style={{marginBottom:12}}>
         <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:5}}>Frameworks</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5}}>{FRAMEWORKS.map(fw=><span key={fw} onClick={()=>toggleFW(fw)} style={{fontSize:10,padding:"3px 9px",borderRadius:10,cursor:"pointer",background:form.frameworks.includes(fw)?"#EEEDFE":"var(--color-background-secondary)",color:form.frameworks.includes(fw)?"#3C3489":"var(--color-text-secondary)",border:form.frameworks.includes(fw)?"0.5px solid #AFA9EC":"0.5px solid transparent"}}>{fw}</span>)}</div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:5}}>Research notes (specialism, what they actually do, anything useful before outreach)</div>
+        <textarea value={form.notes||""} onChange={e=>set("notes",e.target.value)} rows={3} style={{...inputStyle,width:"100%",resize:"vertical"}}/>
       </div>
       <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:8}}>
         <button style={btnStyle} onClick={onClose}>Cancel</button>
@@ -1005,31 +1025,35 @@ function ClientsView({contacts,openContact}){
   );
 }
 
-function TendersView({tenders,contacts,openContact}){
+function TendersView({tenders,contacts,openContact,logTenderInterest}){
   const [search,setSearch]=useState("");
   const [filterRegion,setFilterRegion]=useState("");
+  const [filterSector,setFilterSector]=useState("");
   const [expandedId,setExpandedId]=useState(null);
 
   const regions = useMemo(()=>[...new Set(tenders.map(t=>t.region).filter(Boolean))].sort(),[tenders]);
+  const sectors = useMemo(()=>[...new Set(tenders.map(t=>t.sector).filter(Boolean))].sort(),[tenders]);
 
   const filtered = useMemo(()=>{
     const q = search.toLowerCase();
     return tenders.filter(t=>{
       const matchQ = !q || `${t.title} ${t.buyer} ${t.sector}`.toLowerCase().includes(q);
-      return matchQ && (!filterRegion||t.region===filterRegion);
+      return matchQ && (!filterRegion||t.region===filterRegion) && (!filterSector||t.sector===filterSector);
     }).sort((a,b)=>new Date(a.deadline||"9999-12-31")-new Date(b.deadline||"9999-12-31"));
-  },[tenders,search,filterRegion]);
+  },[tenders,search,filterRegion,filterSector]);
 
   if(!tenders.length) return <div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>Loading live tender data…</div>;
 
+  const filterLabel = [filterRegion,filterSector].filter(Boolean).join(" + ");
   return (
     <div>
       <div style={{display:"flex",gap:7,marginBottom:8,flexWrap:"wrap"}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tenders by title, buyer, sector…" style={{flex:1,minWidth:200,...inputStyle}}/>
         <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={inputStyle}><option value="">All regions</option>{regions.map(r=><option key={r}>{r}</option>)}</select>
+        <select value={filterSector} onChange={e=>setFilterSector(e.target.value)} style={inputStyle}><option value="">All sectors</option>{sectors.map(s=><option key={s}>{s}</option>)}</select>
       </div>
       <div style={{fontSize:11,color:"var(--color-text-tertiary)",marginBottom:8}}>
-        {filtered.length} tender{filtered.length!==1?"s":""}{filterRegion?` in ${filterRegion}`:""}, soonest-closing first{filtered.length>100?" — showing first 100, search to narrow":""}
+        {filtered.length} tender{filtered.length!==1?"s":""}{filterLabel?` — ${filterLabel}`:""}, soonest-closing first{filtered.length>100?" — showing first 100, search to narrow":""}
       </div>
       {filtered.slice(0,100).map(t=>{
         const expanded = expandedId===t.id;
@@ -1058,6 +1082,7 @@ function TendersView({tenders,contacts,openContact}){
                         <div style={{fontSize:10,color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.notes?c.notes.slice(0,90):c.contactName}</div>
                       </div>
                       {(c.tags||[]).includes("tier-1")&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#EEEDFE",color:"#3C3489",flexShrink:0}}>framework</span>}
+                      <button onClick={e=>{e.stopPropagation();logTenderInterest(c.id,t);}} style={{...btnStyle,fontSize:10,padding:"3px 8px",flexShrink:0}}>Flag interest</button>
                     </div>
                   ))
                 }
