@@ -29,6 +29,7 @@ const COLUMN_MAP = {
   "Contract End":     "contract_end",
   "Frameworks":       "frameworks",
   "Tags":             "tags",
+  "Notes":            "notes",
 };
 
 function parseCSV(text) {
@@ -79,7 +80,7 @@ function validateRow(row, index) {
   return errors;
 }
 
-function rowToDbRecord(row) {
+function rowToDbRecord(row, currentUserEmail) {
   // Parse pipe-separated array fields
   const toArr = (val) => val ? val.split("|").map(s => s.trim()).filter(Boolean) : [];
 
@@ -100,7 +101,8 @@ function rowToDbRecord(row) {
     contract_end:     row["Contract End"]?.trim() || null,
     frameworks:       toArr(row["Frameworks"]),
     tags:             toArr(row["Tags"]),
-    assigned_to:      "You",
+    notes:            row["Notes"]?.trim() || null,
+    assigned_to:      currentUserEmail || "You",
     follow_up_date:   null,
   };
 }
@@ -109,7 +111,7 @@ function rowToDbRecord(row) {
 const btnStyle = { fontSize:12, padding:"6px 12px", borderRadius:7, border:"0.5px solid var(--color-border-secondary)", background:"var(--color-background-primary)", color:"var(--color-text-primary)", cursor:"pointer", fontFamily:"inherit" };
 const btnPrimary = { ...btnStyle, background:"#185FA5", color:"white", border:"none" };
 
-export default function ImportCSVModal({ onClose, supabase, onImportComplete }) {
+export default function ImportCSVModal({ onClose, supabase, onImportComplete, currentUserEmail }) {
   const [step, setStep]           = useState("drop");   // drop | preview | importing | done
   const [fileName, setFileName]   = useState("");
   const [headers, setHeaders]     = useState([]);
@@ -165,12 +167,19 @@ export default function ImportCSVModal({ onClose, supabase, onImportComplete }) 
     setStep("importing");
     setImportProgress(0);
 
-    const toInsert = validRows.map(rowToDbRecord);
+    const toInsert = validRows.map(row => rowToDbRecord(row, currentUserEmail));
     const BATCH = 50;
     let added = 0, skipped = 0, errors = 0;
 
-    // Fetch existing emails + names to detect duplicates
-    const { data: existing } = await supabase.from("contacts").select("email, company, contact_name");
+    // Fetch existing emails + names to detect duplicates (paginated — a single
+    // unpaginated query silently caps at 1000 rows once the table grows past it)
+    let existing = [], from = 0;
+    while (true) {
+      const { data } = await supabase.from("contacts").select("email, company, contact_name").range(from, from + 999);
+      existing = existing.concat(data || []);
+      if (!data || data.length < 1000) break;
+      from += 1000;
+    }
     const existingEmails = new Set((existing || []).map(c => c.email?.toLowerCase()).filter(Boolean));
     const existingNames  = new Set((existing || []).map(c => `${c.company?.toLowerCase()}|${c.contact_name?.toLowerCase()}`));
 
@@ -203,7 +212,7 @@ export default function ImportCSVModal({ onClose, supabase, onImportComplete }) 
   // ── Render ──────────────────────────────────────────────────────────
   return (
     <div onClick={onClose} style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.6)", zIndex:1000, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div onClick={e => e.stopPropagation()} style={{ background:"#ffffff", borderRadius:12, border:"1px solid #D0D0D0", boxShadow:"0 12px 60px rgba(0,0,0,0.35)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}><div onClick={e => e.stopPropagation()} style={{ background:"#ffffff", borderRadius:12, border:"1px solid #D0D0D0", boxShadow:"0 12px 60px rgba(0,0,0,0.35)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:"#ffffff", borderRadius:12, border:"1px solid #D0D0D0", boxShadow:"0 12px 60px rgba(0,0,0,0.35)", width:"100%", maxWidth:640, maxHeight:"88vh", overflowY:"auto", padding:24 }}>
 
         {/* ── Step 1: Drop zone ── */}
         {step === "drop" && (

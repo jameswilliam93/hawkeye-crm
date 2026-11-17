@@ -86,6 +86,23 @@ function mapTemplate(row){
   return { id:row.id, name:row.name, subject:row.subject||"", body:row.body||"" };
 }
 
+// Supabase caps a single unpaginated query at 1000 rows — page through with
+// .range() until a page comes back short, rather than relying on a project
+// dashboard setting that silently truncates data as tables grow past it.
+const PAGE_SIZE = 1000;
+async function fetchAllRows(table, orderCol, ascending){
+  let all = [], from = 0;
+  while(true){
+    const { data, error } = await supabase.from(table).select("*")
+      .order(orderCol, { ascending }).range(from, from + PAGE_SIZE - 1);
+    if(error) throw error;
+    all = all.concat(data || []);
+    if(!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 // ── Sub-components ─────────────────────────────────────────────────────
 const StagePill = ({stage, small})=>{
   const s = STAGE_STYLE[stage]||{bg:"#eee",color:"#333"};
@@ -105,6 +122,73 @@ const Modal = ({children, onClose})=>(
   </div>
 );
 
+// ── Live tender matching ────────────────────────────────────────────────
+// UK postcode area -> the broad region names used by the tender board.
+// Approximate at the boundaries (a handful of areas straddle two regions)
+// but good enough to surface "is there live work near this contact".
+const POSTCODE_AREA_TO_REGION = {
+  E:"London",EC:"London",N:"London",NW:"London",SE:"London",SW:"London",W:"London",WC:"London",
+  BR:"South East England",CR:"South East England",DA:"South East England",EN:"South East England",HA:"South East England",IG:"South East England",KT:"South East England",RM:"South East England",SM:"South East England",TW:"South East England",UB:"South East England",WD:"South East England",
+  GU:"South East England",ME:"South East England",MK:"South East England",OX:"South East England",PO:"South East England",RG:"South East England",SL:"South East England",SO:"South East England",TN:"South East England",RH:"South East England",BN:"South East England",HP:"South East England",AL:"South East England",LU:"South East England",SG:"South East England",
+  BA:"South West England",BH:"South West England",BS:"South West England",DT:"South West England",EX:"South West England",GL:"South West England",PL:"South West England",SN:"South West England",SP:"South West England",TA:"South West England",TQ:"South West England",TR:"South West England",
+  CB:"East of England",CM:"East of England",CO:"East of England",IP:"East of England",NR:"East of England",SS:"East of England",
+  DE:"East Midlands",LE:"East Midlands",LN:"East Midlands",NG:"East Midlands",NN:"East Midlands",PE:"East Midlands",
+  B:"West Midlands",CV:"West Midlands",DY:"West Midlands",HR:"West Midlands",ST:"West Midlands",SY:"West Midlands",TF:"West Midlands",WR:"West Midlands",WS:"West Midlands",WV:"West Midlands",
+  BD:"Yorkshire and The Humber",DN:"Yorkshire and The Humber",HD:"Yorkshire and The Humber",HG:"Yorkshire and The Humber",HU:"Yorkshire and The Humber",HX:"Yorkshire and The Humber",LS:"Yorkshire and The Humber",S:"Yorkshire and The Humber",WF:"Yorkshire and The Humber",YO:"Yorkshire and The Humber",
+  BB:"North West England",BL:"North West England",CH:"North West England",CW:"North West England",FY:"North West England",L:"North West England",LA:"North West England",M:"North West England",OL:"North West England",PR:"North West England",SK:"North West England",WA:"North West England",WN:"North West England",
+  CA:"North East England",DH:"North East England",DL:"North East England",NE:"North East England",SR:"North East England",TS:"North East England",
+  CF:"Wales",LD:"Wales",LL:"Wales",NP:"Wales",SA:"Wales",
+  AB:"Scotland",DD:"Scotland",DG:"Scotland",EH:"Scotland",FK:"Scotland",G:"Scotland",HS:"Scotland",IV:"Scotland",KA:"Scotland",KW:"Scotland",KY:"Scotland",ML:"Scotland",PA:"Scotland",PH:"Scotland",TD:"Scotland",ZE:"Scotland",
+  BT:"Northern Ireland",
+};
+
+function regionFromLocation(location){
+  if(!location) return null;
+  const match = location.toUpperCase().match(/\b([A-Z]{1,2})\d/);
+  if(!match) return null;
+  return POSTCODE_AREA_TO_REGION[match[1]] || null;
+}
+
+function matchTenders(tenders, region, limit=5){
+  if(!region || !tenders?.length) return [];
+  const inRegion = tenders.filter(t=>t.region===region);
+  inRegion.sort((a,b)=>{
+    const aRel = a.sector==="Recruitment & Staffing" ? 0 : 1;
+    const bRel = b.sector==="Recruitment & Staffing" ? 0 : 1;
+    if(aRel!==bRel) return aRel-bRel;
+    return new Date(a.deadline||"9999") - new Date(b.deadline||"9999");
+  });
+  return inRegion.slice(0, limit);
+}
+
+const STOPWORDS = new Set(["about","above","across","after","again","against","below","between","could","every","other","should","through","under","while","with","from","have","that","this","will","your","their","staff","services","service","provision","recruitment"]);
+function keywordsOf(text){
+  return new Set((text||"").toLowerCase().split(/[^a-z]+/).filter(w=>w.length>4 && !STOPWORDS.has(w)));
+}
+// Given a tender, rank CRM contacts in the same region by how well their
+// known specialism (website blurb / industry) overlaps the tender's own
+// wording — a rough but genuinely useful stand-in until every lead has a
+// clean specialism tag.
+function matchContactsForTender(contacts, tender, limit=8){
+  if(!tender?.region) return [];
+  const tenderWords = keywordsOf(`${tender.title} ${tender.sector} ${tender.description||""}`);
+  return contacts
+    .map(c=>({contact:c, region:regionFromLocation(c.location)}))
+    .filter(x=>x.region===tender.region)
+    .map(({contact})=>{
+      const contactWords = keywordsOf(`${contact.notes||""} ${contact.industry||""}`);
+      let overlap = 0;
+      contactWords.forEach(w=>{ if(tenderWords.has(w)) overlap++; });
+      let score = overlap*3;
+      if((contact.tags||[]).includes("tier-1")) score += 2;
+      if((contact.tags||[]).includes("framework")) score += 1;
+      return {contact, score};
+    })
+    .sort((a,b)=>b.score-a.score)
+    .slice(0, limit)
+    .map(x=>x.contact);
+}
+
 // ── Main App ──────────────────────────────────────────────────────────
 export default function HawkeyeCRM({ session }){
   const [contacts, setContacts] = useState([]);
@@ -116,9 +200,13 @@ export default function HawkeyeCRM({ session }){
   const [search, setSearch] = useState("");
   const [filterStage, setFilterStage] = useState("");
   const [filterSource, setFilterSource] = useState("");
+  const [filterSize, setFilterSize] = useState("");
+  const [filterMine, setFilterMine] = useState(false);
+  const [contactSort, setContactSort] = useState("newest");
   const [selected, setSelected] = useState([]);
   const [newActivity, setNewActivity] = useState({type:"Email",note:""});
   const [toastMsg, setToastMsg] = useState("");
+  const [tenders, setTenders] = useState([]);
 
   const toast = (msg)=>{ setToastMsg(msg); setTimeout(()=>setToastMsg(""),2500); };
   const closeModal = ()=>setModal(null);
@@ -127,10 +215,10 @@ export default function HawkeyeCRM({ session }){
   const loadData = useCallback(async ()=>{
     setLoading(true);
     try {
-      const [{ data: contactRows }, { data: activityRows }, { data: templateRows }] = await Promise.all([
-        supabase.from("contacts").select("*").order("created_at", { ascending: false }),
-        supabase.from("activities").select("*").order("date", { ascending: false }),
-        supabase.from("templates").select("*").order("created_at", { ascending: true }),
+      const [contactRows, activityRows, templateRows] = await Promise.all([
+        fetchAllRows("contacts", "created_at", false),
+        fetchAllRows("activities", "date", false),
+        fetchAllRows("templates", "created_at", true),
       ]);
       const mapped = (contactRows||[]).map(mapContact);
       (activityRows||[]).forEach(a=>{
@@ -145,13 +233,20 @@ export default function HawkeyeCRM({ session }){
 
   useEffect(()=>{ loadData(); }, [loadData]);
 
+  useEffect(()=>{
+    fetch("https://hawkeye-solutions.co.uk/uk-tenders.json")
+      .then(r=>r.ok ? r.json() : [])
+      .then(setTenders)
+      .catch(()=>setTenders([])); // non-critical — profile just shows no tender matches
+  }, []);
+
   const addContact = async (data)=>{
     const { data: row, error } = await supabase.from("contacts").insert([{
       company: data.company, contact_name: data.contactName, title: data.title,
       email: data.email, phone: data.phone, linkedin: data.linkedin,
       location: data.location, company_size: data.companySize, website: data.website,
       industry: data.industry, stage: data.stage||"New Lead", source: data.source,
-      assigned_to: data.assignedTo||"You", follow_up_date: data.followUpDate||null,
+      assigned_to: data.assignedTo||session?.user?.email||"You", follow_up_date: data.followUpDate||null,
       current_supplier: data.currentSupplier, contract_end: data.contractEnd,
       frameworks: data.frameworks||[], tags: data.tags||[], estimated_value: data.estimatedValue,
     }]).select().single();
@@ -181,18 +276,40 @@ export default function HawkeyeCRM({ session }){
 
   const bulkStage = (stage)=>{ selected.forEach(id=>moveStage(id,stage)); setSelected([]); };
 
+  const deleteContact = async (id)=>{
+    await supabase.from("activities").delete().eq("contact_id", id);
+    const { error } = await supabase.from("contacts").delete().eq("id", id);
+    if(error){ toast("Error deleting contact"); return; }
+    setContacts(cs=>cs.filter(c=>c.id!==id));
+    toast("Contact deleted");
+  };
+
+  const bulkDelete = ()=>{
+    if(!window.confirm(`Delete ${selected.length} contact(s)? This can't be undone.`)) return;
+    selected.forEach(id=>deleteContact(id));
+    setSelected([]);
+  };
+
   const logActivity = async (contactId)=>{
     if(!newActivity.note.trim()) return;
     const today = new Date().toISOString().slice(0,10);
+    const activityDate = newActivity.date || today;
     const { data: row, error } = await supabase.from("activities").insert([{
       contact_id: contactId, type: newActivity.type, note: newActivity.note,
-      date: today, by: session?.user?.email||"You",
+      date: activityDate, by: session?.user?.email||"You",
     }]).select().single();
     if(error){ toast("Error logging activity"); return; }
-    setContacts(cs=>cs.map(c=>c.id===contactId?{...c,activities:[mapActivity(row),...c.activities],lastContacted:today}:c));
+    setContacts(cs=>cs.map(c=>c.id===contactId?{...c,activities:[mapActivity(row),...c.activities].sort((a,b)=>new Date(b.date)-new Date(a.date)),lastContacted:today}:c));
     await supabase.from("contacts").update({last_contacted:today}).eq("id",contactId);
-    setNewActivity({type:"Email",note:""});
-    toast("Activity logged");
+    // Logging any interaction implies contact's been made — nudge a brand-new lead forward automatically
+    const contact = contacts.find(c=>c.id===contactId);
+    if(contact?.stage==="New Lead"){
+      updateContact(contactId,{stage:"Contacted"});
+      toast("Activity logged — moved to Contacted");
+    } else {
+      toast("Activity logged");
+    }
+    setNewActivity({type:"Email",note:"",date:""});
   };
 
   const saveTemplate = async (data)=>{
@@ -218,9 +335,27 @@ export default function HawkeyeCRM({ session }){
 
   const filteredContacts = useMemo(()=>contacts.filter(c=>{
     const q = search.toLowerCase();
-    const matchQ = !q||c.company.toLowerCase().includes(q)||c.contactName.toLowerCase().includes(q)||(c.tags||[]).join(" ").toLowerCase().includes(q);
-    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource);
-  }),[contacts,search,filterStage,filterSource]);
+    const haystack = [c.company,c.contactName,c.industry,c.location,c.currentSupplier,...(c.tags||[]),...(c.frameworks||[])].join(" ").toLowerCase();
+    const matchQ = !q||haystack.includes(q);
+    const matchMine = !filterMine||c.assignedTo===session?.user?.email;
+    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine;
+  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterMine,contactSort,session]);
+
+  const exportCSV = (rows)=>{
+    const headers = ["Company","Contact Name","Title","Email","Phone","LinkedIn","Location","Company Size","Website","Industry","Stage","Source","Current Supplier","Contract End","Frameworks","Tags"];
+    const escape = (v)=>{ const s = String(v??""); return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s; };
+    const lines = [headers.join(",")];
+    rows.forEach(c=>{
+      lines.push([c.company,c.contactName,c.title,c.email,c.phone,c.linkedin,c.location,c.companySize,c.website,c.industry,c.stage,c.source,c.currentSupplier,c.contractEnd,(c.frameworks||[]).join("|"),(c.tags||[]).join("|")].map(escape).join(","));
+    });
+    const blob = new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8;"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `hawkeye-contacts-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} contacts`);
+  };
 
   const overdueContacts = contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage)&&isOverdue(c.followUpDate));
   const stalContacts = contacts.filter(c=>!["Won / Active","Lost / Dead","New Lead"].includes(c.stage)&&c.lastContacted&&(Math.floor((Date.now()-new Date(c.lastContacted))/(86400000)))>=14);
@@ -231,6 +366,8 @@ export default function HawkeyeCRM({ session }){
     {id:"followups",label:"Follow-ups",icon:<ClockIcon/>,badge:overdueContacts.length||null},
     {id:"pipeline",label:"Pipeline",icon:<PipeIcon/>},
     {id:"contacts",label:"Contacts",icon:<PersonIcon/>},
+    {id:"clients",label:"Active Clients",icon:<StarIcon/>},
+    {id:"tenders",label:"Tender Matches",icon:<TargetIcon/>},
     {id:"templates",label:"Templates",icon:<DocIcon/>},
   ];
 
@@ -270,15 +407,19 @@ export default function HawkeyeCRM({ session }){
       <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
         <div style={{background:"var(--color-background-primary)",borderBottom:"0.5px solid var(--color-border-tertiary)",padding:"0 20px",height:50,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
           <span style={{fontSize:14,fontWeight:500}}>
-            {view==="contact"&&contact?`${contact.company} — ${contact.contactName}`:view==="dashboard"?"Dashboard":view==="followups"?"Follow-ups":view==="pipeline"?"Pipeline":view==="contacts"?"Contacts":"Templates"}
+            {view==="contact"&&contact?`${contact.company} — ${contact.contactName}`:view==="dashboard"?"Dashboard":view==="followups"?"Follow-ups":view==="pipeline"?"Pipeline":view==="contacts"?"Contacts":view==="clients"?"Active Clients":view==="tenders"?"Tender Matches":"Templates"}
           </span>
           <div style={{display:"flex",gap:8}}>
             {view==="contacts"&&selected.length>0&&(
-              <select onChange={e=>{if(e.target.value){bulkStage(e.target.value);e.target.value=""}}} style={btnStyle} defaultValue="">
-                <option value="">Bulk move ({selected.length})…</option>
-                {STAGES.map(s=><option key={s} value={s}>{s}</option>)}
-              </select>
+              <>
+                <select onChange={e=>{if(e.target.value){bulkStage(e.target.value);e.target.value=""}}} style={btnStyle} defaultValue="">
+                  <option value="">Bulk move ({selected.length})…</option>
+                  {STAGES.map(s=><option key={s} value={s}>{s}</option>)}
+                </select>
+                <button style={{...btnStyle,color:"#A32D2D",borderColor:"#F09595"}} onClick={bulkDelete}>Delete ({selected.length})</button>
+              </>
             )}
+            {view==="contacts"&&<button style={btnStyle} onClick={()=>exportCSV(filteredContacts)}>Export CSV</button>}
             <button style={btnStyle} onClick={()=>setModal({type:"import"})}>Import CSV</button>
             <button style={{...btnStyle,background:"#185FA5",color:"white",border:"none"}} onClick={()=>setModal({type:"addContact",stage:""})}>+ Add contact</button>
           </div>
@@ -288,20 +429,23 @@ export default function HawkeyeCRM({ session }){
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
           {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts}/>}
-          {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} selected={selected} setSelected={setSelected} openContact={openContact}/>}
-          {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates}/>}
+          {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
+          {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
+          {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
+          {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact}/>}
           {view==="templates"&&<TemplatesView templates={templates} saveTemplate={saveTemplate} deleteTemplate={deleteTemplate} setModal={setModal}/>}
         </div>
       </div>
 
-      {modal?.type==="addContact"&&<AddContactModal onClose={closeModal} onSave={(d)=>{addContact({...d,stage:modal.stage||"New Lead"});closeModal();}} prefillStage={modal.stage}/>}
-      {modal?.type==="editContact"&&<AddContactModal edit contact={modal.contact} onClose={closeModal} onSave={(d)=>{updateContact(modal.contact.id,d);closeModal();toast("Saved");}}/>}
+      {modal?.type==="addContact"&&<AddContactModal onClose={closeModal} onSave={(d)=>{addContact({...d,stage:modal.stage||"New Lead"});closeModal();}} prefillStage={modal.stage} currentUserEmail={session?.user?.email}/>}
+      {modal?.type==="editContact"&&<AddContactModal edit contact={modal.contact} onClose={closeModal} onSave={(d)=>{updateContact(modal.contact.id,d);closeModal();toast("Saved");}} currentUserEmail={session?.user?.email}/>}
       {modal?.type==="winloss"&&<WinLossModal stage={modal.stage} onClose={closeModal} onSave={(reason)=>{updateContact(modal.id,{stage:modal.stage,lossReason:reason});closeModal();toast(`Moved to ${modal.stage}`);}}/>}
       {modal?.type==="template"&&<TemplateModal template={modal.template} onClose={closeModal} onSave={(t)=>{saveTemplate(t);closeModal();}}/>}
 {modal?.type==="import" && (
         <ImportCSVModal
           onClose={closeModal}
           supabase={supabase}
+          currentUserEmail={session?.user?.email}
           onImportComplete={(count) => {
             loadData();
             toast(`${count} contacts imported`);
@@ -314,16 +458,31 @@ export default function HawkeyeCRM({ session }){
   );
 }
 
+function parseValue(v){
+  if(!v) return 0;
+  const n = parseFloat(String(v).replace(/[^0-9.]/g,""));
+  return isNaN(n) ? 0 : n;
+}
+function formatGBP(n){
+  if(n>=1000000) return `£${(n/1000000).toFixed(1)}m`;
+  if(n>=1000) return `£${Math.round(n/1000)}k`;
+  return `£${Math.round(n)}`;
+}
+
 function DashboardView({contacts,openContact}){
   const stageCounts = STAGES.map(s=>({stage:s,count:contacts.filter(c=>c.stage===s).length}));
   const overdue = contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage)&&isOverdue(c.followUpDate));
-  const recentActs = contacts.flatMap(c=>(c.activities||[]).map(a=>({...a,company:c.company}))).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
+  const recentActs = contacts.flatMap(c=>(c.activities||[]).map(a=>({...a,company:c.company,contactId:c.id}))).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
   const barMax = Math.max(...stageCounts.map(s=>s.count),1);
   const BAR_COLORS = {"New Lead":"#B5D4F4","Researched":"#CECBF6","Contacted":"#FAC775","Follow-up Due":"#F09595","Meeting Booked":"#C0DD97","Proposal Sent":"#F4C0D1","Won / Active":"#5DCAA5","Lost / Dead":"#D3D1C7"};
+  const activeContacts = contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage));
+  const pipelineValue = activeContacts.reduce((sum,c)=>sum+parseValue(c.estimatedValue),0);
+  const sourceCounts = SOURCES.map(s=>({source:s,count:contacts.filter(c=>c.source===s).length})).filter(s=>s.count>0);
+  const sourceMax = Math.max(...sourceCounts.map(s=>s.count),1);
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10,marginBottom:16}}>
-        {[{label:"Total contacts",value:contacts.length},{label:"Active pipeline",value:contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage)).length},{label:"Won / active",value:contacts.filter(c=>c.stage==="Won / Active").length,up:true},{label:"Overdue follow-ups",value:overdue.length,warn:overdue.length>0}].map((m,i)=>(
+      <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:10,marginBottom:16}}>
+        {[{label:"Total contacts",value:contacts.length},{label:"Active pipeline",value:activeContacts.length},{label:"Pipeline value",value:formatGBP(pipelineValue)},{label:"Won / active",value:contacts.filter(c=>c.stage==="Won / Active").length,up:true},{label:"Overdue follow-ups",value:overdue.length,warn:overdue.length>0}].map((m,i)=>(
           <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:8,padding:"11px 14px"}}>
             <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{m.label}</div>
             <div style={{fontSize:22,fontWeight:500,color:m.warn?"#A32D2D":"var(--color-text-primary)"}}>{m.value}</div>
@@ -354,15 +513,27 @@ function DashboardView({contacts,openContact}){
             </div>
           ))}
         </div>
+        <div style={cardStyle}>
+          <div style={{fontSize:12,fontWeight:500,marginBottom:12}}>Leads by source</div>
+          {sourceCounts.map(({source,count})=>(
+            <div key={source} style={{display:"flex",alignItems:"center",gap:8,marginBottom:7}}>
+              <div style={{width:72,fontSize:11,color:"var(--color-text-secondary)",flexShrink:0}}>{source}</div>
+              <div style={{flex:1,background:"var(--color-background-secondary)",borderRadius:4,height:14,overflow:"hidden"}}>
+                <div style={{height:"100%",width:`${Math.round((count/sourceMax)*100)}%`,background:"#185FA5",borderRadius:4}}/>
+              </div>
+              <div style={{width:28,fontSize:11,fontWeight:500,textAlign:"right"}}>{count}</div>
+            </div>
+          ))}
+        </div>
       </div>
       <div style={cardStyle}>
         <div style={{fontSize:12,fontWeight:500,marginBottom:10}}>Recent activity</div>
         {recentActs.length===0?<div style={{fontSize:12,color:"var(--color-text-tertiary)"}}>No activity logged yet.</div>:
         recentActs.map(a=>(
-          <div key={a.id} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
+          <div key={a.id} onClick={()=>openContact({id:a.contactId})} style={{display:"flex",gap:10,padding:"6px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
             <div style={{fontSize:11,color:"var(--color-text-tertiary)",width:64,flexShrink:0,paddingTop:1}}>{daysAgo(a.date)}</div>
             <div style={{fontSize:11,color:"var(--color-text-secondary)",marginRight:4,flexShrink:0}}>{a.type}</div>
-            <div style={{fontSize:11,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><strong>{a.company}</strong> — {a.note}</div>
+            <div style={{fontSize:11,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}><strong style={{color:"#185FA5"}}>{a.company}</strong> — {a.note}</div>
           </div>
         ))}
       </div>
@@ -408,15 +579,36 @@ function FollowupsView({contacts,openContact,updateContact,toast}){
   );
 }
 
+const PIPELINE_SORTS = {
+  "newest":  (a,b)=>new Date(b.addedDate||0)-new Date(a.addedDate||0),
+  "oldest":  (a,b)=>new Date(a.addedDate||0)-new Date(b.addedDate||0),
+  "az":      (a,b)=>a.company.localeCompare(b.company),
+};
+const CONTACT_SORTS = {
+  newest:        (a,b)=>new Date(b.addedDate||0)-new Date(a.addedDate||0),
+  oldest:        (a,b)=>new Date(a.addedDate||0)-new Date(b.addedDate||0),
+  az:            (a,b)=>a.company.localeCompare(b.company),
+  recent_touch:  (a,b)=>new Date(b.lastContacted||0)-new Date(a.lastContacted||0),
+  stale_touch:   (a,b)=>new Date(a.lastContacted||"9999")-new Date(b.lastContacted||"9999"),
+};
+
 function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
+  const [sortBy,setSortBy]=useState("newest");
   const stalIds = new Set(stalContacts.map(c=>c.id));
   return (
     <div>
       {stalContacts.length>0&&<div style={{background:"#FAEEDA",border:"0.5px solid #EF9F27",borderRadius:8,padding:"8px 12px",marginBottom:12}}><span style={{fontSize:11,color:"#633806"}}>⚠ {stalContacts.length} contact{stalContacts.length>1?"s":""} not touched in 14+ days: {stalContacts.map(c=>c.company).join(", ")}</span></div>}
       {contacts.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts yet. Click "+ Add contact" to get started.</div>}
+      <div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+        <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...inputStyle,fontSize:11}}>
+          <option value="newest">Sort: Newest added</option>
+          <option value="oldest">Sort: Oldest added</option>
+          <option value="az">Sort: Company A–Z</option>
+        </select>
+      </div>
       <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:8}}>
         {STAGES.map(stage=>{
-          const cols=contacts.filter(c=>c.stage===stage);
+          const cols=contacts.filter(c=>c.stage===stage).sort(PIPELINE_SORTS[sortBy]);
           const {bg,color}=STAGE_STYLE[stage];
           return (
             <div key={stage} style={{minWidth:168,flexShrink:0}}>
@@ -444,17 +636,63 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
   );
 }
 
-function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,selected,setSelected,openContact}){
+function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
+  const [groupByCompany,setGroupByCompany]=useState(false);
   const toggleSelect=(id)=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const allSelected=contacts.length>0&&contacts.every(c=>selected.includes(c.id));
   const toggleAll=()=>setSelected(allSelected?[]:contacts.map(c=>c.id));
+
+  const companyGroups = useMemo(()=>{
+    if(!groupByCompany) return null;
+    const groups = {}; // normalised name -> {label, people}
+    contacts.forEach(c=>{
+      const label = c.company || "(No company)";
+      const key = label.trim().toLowerCase();
+      if(!groups[key]) groups[key] = {label, people:[]};
+      groups[key].people.push(c);
+    });
+    return Object.values(groups).sort((a,b)=>b.people.length-a.people.length);
+  },[groupByCompany,contacts]);
+
   return (
     <div>
       <div style={{display:"flex",gap:7,marginBottom:12,flexWrap:"wrap"}}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search contacts, companies, tags…" style={{flex:1,minWidth:180,...inputStyle}}/>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search company, contact, industry, location, tags…" style={{flex:1,minWidth:180,...inputStyle}}/>
         <select value={filterStage} onChange={e=>setFilterStage(e.target.value)} style={inputStyle}><option value="">All stages</option>{STAGES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSource} onChange={e=>setFilterSource(e.target.value)} style={inputStyle}><option value="">All sources</option>{SOURCES.map(s=><option key={s}>{s}</option>)}</select>
+        <select value={filterSize} onChange={e=>setFilterSize(e.target.value)} style={inputStyle}><option value="">All sizes</option>{["1-10","11-50","51-200","200+"].map(s=><option key={s}>{s}</option>)}</select>
+        <select value={contactSort} onChange={e=>setContactSort(e.target.value)} style={inputStyle}>
+          <option value="newest">Sort: Newest added</option>
+          <option value="oldest">Sort: Oldest added</option>
+          <option value="az">Sort: Company A–Z</option>
+          <option value="recent_touch">Sort: Recently touched</option>
+          <option value="stale_touch">Sort: Longest untouched</option>
+        </select>
+        <button style={{...btnStyle,background:filterMine?"#185FA5":undefined,color:filterMine?"white":undefined,border:filterMine?"none":undefined}} onClick={()=>setFilterMine(m=>!m)}>My contacts</button>
+        <button style={{...btnStyle,background:groupByCompany?"#185FA5":undefined,color:groupByCompany?"white":undefined,border:groupByCompany?"none":undefined}} onClick={()=>setGroupByCompany(g=>!g)}>Group by company</button>
       </div>
+      {groupByCompany ? (
+        <div>
+          {companyGroups.map(({label,people})=>(
+            <div key={label} style={{...cardStyle,marginBottom:8,padding:"10px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:people.length>1?8:0}}>
+                <span style={{fontSize:12,fontWeight:500}}>{label}</span>
+                <span style={{fontSize:10,background:"var(--color-background-secondary)",color:"var(--color-text-secondary)",padding:"1px 6px",borderRadius:8}}>{people.length} {people.length===1?"contact":"contacts"}</span>
+              </div>
+              {people.map(c=>(
+                <div key={c.id} onClick={()=>openContact(c)} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderTop:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+                  <Avatar name={c.contactName} size={22}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName}{c.title?` · ${c.title}`:""}</div>
+                  </div>
+                  <StagePill stage={c.stage} small/>
+                </div>
+              ))}
+            </div>
+          ))}
+          {contacts.length===0&&<div style={{textAlign:"center",padding:"32px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts match your filters.</div>}
+        </div>
+      ) : (
       <div style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
           <thead><tr style={{borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
@@ -478,17 +716,33 @@ function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filt
         </table>
         {contacts.length===0&&<div style={{textAlign:"center",padding:"32px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts match your filters.</div>}
       </div>
+      )}
     </div>
   );
 }
 
-function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActivity,logActivity,setView,setModal,templates}){
+function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActivity,logActivity,setView,setModal,templates,tenders,deleteContact}){
   const [tagInput,setTagInput]=useState("");
   const [showTemplates,setShowTemplates]=useState(false);
   const [editFollowUp,setEditFollowUp]=useState(false);
+  const [editAssigned,setEditAssigned]=useState(false);
+  const [emailSubject,setEmailSubject]=useState("");
+  const region = regionFromLocation(contact.location);
+  const matchedTenders = matchTenders(tenders, region);
   const addTag=(t)=>{ if(!t.trim()||contact.tags?.includes(t)) return; updateContact(contact.id,{tags:[...(contact.tags||[]),t.trim()]}); setTagInput(""); };
   const removeTag=(t)=>updateContact(contact.id,{tags:(contact.tags||[]).filter(x=>x!==t)});
-  const applyTemplate=(tmpl)=>{ setNewActivity(a=>({...a,type:"Email",note:tmpl.body.replace(/\[Name\]/g,contact.contactName.split(" ")[0]).replace(/\[Company\]/g,contact.company)})); setShowTemplates(false); };
+  const applyTemplate=(tmpl)=>{
+    const fill = s=>(s||"").replace(/\[Name\]/g,contact.contactName.split(" ")[0]).replace(/\[Company\]/g,contact.company);
+    setNewActivity(a=>({...a,type:"Email",note:fill(tmpl.body)}));
+    setEmailSubject(fill(tmpl.subject));
+    setShowTemplates(false);
+  };
+  const mailtoHref = contact.email ? `mailto:${contact.email}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(newActivity.note||"")}` : null;
+  const handleDelete = ()=>{
+    if(!window.confirm(`Delete ${contact.company}? This can't be undone.`)) return;
+    deleteContact(contact.id);
+    setView("contacts");
+  };
   return (
     <div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
@@ -496,6 +750,7 @@ function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActiv
         <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Contacts / {contact.company}</span>
         <div style={{marginLeft:"auto",display:"flex",gap:7}}>
           <button style={btnStyle} onClick={()=>setModal({type:"editContact",contact})}>Edit</button>
+          <button style={{...btnStyle,color:"#A32D2D",borderColor:"#F09595"}} onClick={handleDelete}>Delete</button>
           <select value={contact.stage} onChange={e=>moveStage(contact.id,e.target.value)} style={{...inputStyle,fontSize:11}}>{STAGES.map(s=><option key={s} value={s}>{s}</option>)}</select>
         </div>
       </div>
@@ -513,13 +768,35 @@ function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActiv
               </div>
             ))}
           </div>
+          {region && matchedTenders.length>0 && (
+            <div style={{...cardStyle,background:"#E6F1FB",border:"0.5px solid #B5D4F4"}}>
+              <div style={{fontSize:10,fontWeight:500,color:"#0C447C",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.05em"}}>Live tenders in {region}</div>
+              {matchedTenders.map(t=>(
+                <a key={t.id} href={t.url} target="_blank" rel="noreferrer" style={{display:"block",textDecoration:"none",padding:"6px 0",borderBottom:"0.5px solid #B5D4F4"}}>
+                  <div style={{fontSize:11,fontWeight:500,color:"#0C447C",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                    {t.sector==="Recruitment & Staffing" && "⭐ "}{t.title}
+                  </div>
+                  <div style={{fontSize:10,color:"#185FA5",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.buyer}</div>
+                  <div style={{fontSize:10,color:"var(--color-text-tertiary)",marginTop:1}}>{t.sector} · closes {t.deadline ? new Date(t.deadline).toLocaleDateString("en-GB") : "n/a"}</div>
+                </a>
+              ))}
+            </div>
+          )}
           <div style={cardStyle}>
             <div style={{fontSize:10,fontWeight:500,color:"var(--color-text-secondary)",marginBottom:8,textTransform:"uppercase",letterSpacing:"0.05em"}}>Pipeline</div>
-            {[{l:"Stage",v:<StagePill stage={contact.stage} small/>},{l:"Source",v:contact.source},{l:"Assigned",v:contact.assignedTo},{l:"Added",v:contact.addedDate},{l:"Last contact",v:contact.lastContacted?daysAgo(contact.lastContacted):"Never"}].map(({l,v})=>(
+            {[{l:"Stage",v:<StagePill stage={contact.stage} small/>},{l:"Added",v:contact.addedBy?`${contact.addedDate} by ${contact.addedBy}`:contact.addedDate},{l:"Last contact",v:contact.lastContacted?daysAgo(contact.lastContacted):"Never"}].map(({l,v})=>(
               <div key={l} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",gap:8}}>
                 <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>{l}</span><span style={{fontSize:11}}>{v}</span>
               </div>
             ))}
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",gap:8}}>
+              <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Assigned</span>
+              {editAssigned?<input defaultValue={contact.assignedTo||""} onBlur={e=>{updateContact(contact.id,{assignedTo:e.target.value});setEditAssigned(false);}} autoFocus style={{fontSize:11,padding:"2px 5px",border:"0.5px solid var(--color-border-secondary)",borderRadius:4,background:"var(--color-background-primary)",color:"var(--color-text-primary)",width:140}}/>:<span onClick={()=>setEditAssigned(true)} style={{fontSize:11,color:"#185FA5",cursor:"pointer"}}>{contact.assignedTo||"Unassigned"}</span>}
+            </div>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",gap:8}}>
+              <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Source</span>
+              <select value={contact.source} onChange={e=>updateContact(contact.id,{source:e.target.value})} style={{fontSize:11,padding:"2px 4px",border:"0.5px solid var(--color-border-secondary)",borderRadius:4,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}>{SOURCES.map(s=><option key={s} value={s}>{s}</option>)}</select>
+            </div>
             <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 0",gap:8}}>
               <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Follow-up</span>
               {editFollowUp?<input type="date" defaultValue={contact.followUpDate||""} onBlur={e=>{updateContact(contact.id,{followUpDate:e.target.value});setEditFollowUp(false);}} autoFocus style={{fontSize:10,padding:"2px 5px",border:"0.5px solid var(--color-border-secondary)",borderRadius:4,background:"var(--color-background-primary)",color:"var(--color-text-primary)"}}/>:<span onClick={()=>setEditFollowUp(true)} style={{fontSize:11,color:isOverdue(contact.followUpDate)?"#A32D2D":"#185FA5",cursor:"pointer",fontWeight:isOverdue(contact.followUpDate)?500:400}}>{contact.followUpDate?daysAgo(contact.followUpDate):"Set date"}</span>}
@@ -551,8 +828,10 @@ function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActiv
             <div style={{fontSize:10,fontWeight:500,color:"var(--color-text-secondary)",marginBottom:10,textTransform:"uppercase",letterSpacing:"0.05em"}}>Activity & notes</div>
             <div style={{display:"flex",gap:6,marginBottom:14,flexWrap:"wrap"}}>
               <select value={newActivity.type} onChange={e=>setNewActivity(a=>({...a,type:e.target.value}))} style={{...inputStyle,fontSize:11}}>{ACTIVITY_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+              <input type="date" value={newActivity.date||new Date().toISOString().slice(0,10)} onChange={e=>setNewActivity(a=>({...a,date:e.target.value}))} title="Backdate this activity if it happened earlier" style={{...inputStyle,fontSize:11,width:118}}/>
               <div style={{flex:1,minWidth:180}}><input value={newActivity.note} onChange={e=>setNewActivity(a=>({...a,note:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&logActivity(contact.id)} placeholder="Log an interaction or note… (Enter to save)" style={{...inputStyle,width:"100%"}}/></div>
               <button style={{...btnStyle,fontSize:11}} onClick={()=>setShowTemplates(s=>!s)}>Templates</button>
+              {mailtoHref && <a href={mailtoHref} style={{...btnStyle,fontSize:11,textDecoration:"none",display:"inline-flex",alignItems:"center"}}>Open in email →</a>}
               <button style={{...btnStyle,background:"#185FA5",color:"white",border:"none",fontSize:11}} onClick={()=>logActivity(contact.id)}>Log</button>
             </div>
             {showTemplates&&<div style={{background:"var(--color-background-secondary)",borderRadius:8,padding:10,marginBottom:12}}><div style={{fontSize:11,fontWeight:500,marginBottom:8}}>Choose a template</div><div style={{display:"flex",flexDirection:"column",gap:5}}>{templates.map(t=><div key={t.id} onClick={()=>applyTemplate(t)} style={{fontSize:11,padding:"6px 10px",borderRadius:6,background:"var(--color-background-primary)",border:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}><div style={{fontWeight:500}}>{t.name}</div><div style={{color:"var(--color-text-secondary)",marginTop:1}}>{t.subject}</div></div>)}</div></div>}
@@ -594,8 +873,8 @@ function TemplatesView({templates,saveTemplate,deleteTemplate,setModal}){
   );
 }
 
-function AddContactModal({onClose,onSave,prefillStage,edit,contact}){
-  const [form,setForm]=useState(contact||{company:"",contactName:"",title:"",email:"",phone:"",linkedin:"",location:"",companySize:"",website:"",stage:prefillStage||"New Lead",source:"Scraped",assignedTo:"You",followUpDate:"",currentSupplier:"",contractEnd:"",frameworks:[],tags:[],industry:"",estimatedValue:""});
+function AddContactModal({onClose,onSave,prefillStage,edit,contact,currentUserEmail}){
+  const [form,setForm]=useState(contact||{company:"",contactName:"",title:"",email:"",phone:"",linkedin:"",location:"",companySize:"",website:"",stage:prefillStage||"New Lead",source:"Scraped",assignedTo:currentUserEmail||"You",followUpDate:"",currentSupplier:"",contractEnd:"",frameworks:[],tags:[],industry:"",estimatedValue:""});
   const set=(k,v)=>setForm(f=>({...f,[k]:v}));
   const toggleFW=(fw)=>set("frameworks",form.frameworks.includes(fw)?form.frameworks.filter(x=>x!==fw):[...form.frameworks,fw]);
   return (
@@ -609,6 +888,7 @@ function AddContactModal({onClose,onSave,prefillStage,edit,contact}){
         <div><div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>Stage</div><select value={form.stage} onChange={e=>set("stage",e.target.value)} style={{...inputStyle,width:"100%"}}>{STAGES.map(s=><option key={s}>{s}</option>)}</select></div>
         <div><div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>Source</div><select value={form.source} onChange={e=>set("source",e.target.value)} style={{...inputStyle,width:"100%"}}>{SOURCES.map(s=><option key={s}>{s}</option>)}</select></div>
         <div><div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>Follow-up date</div><input type="date" value={form.followUpDate||""} onChange={e=>set("followUpDate",e.target.value)} style={{...inputStyle,width:"100%"}}/></div>
+        <div><div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>Assigned to</div><input value={form.assignedTo||""} onChange={e=>set("assignedTo",e.target.value)} placeholder="email" style={{...inputStyle,width:"100%"}}/></div>
       </div>
       <div style={{marginBottom:12}}>
         <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:5}}>Frameworks</div>
@@ -665,3 +945,128 @@ const ClockIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none">
 const PipeIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M2 3h12M4 8h8M6 13h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 const PersonIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="5" r="3" stroke="currentColor" strokeWidth="1.3"/><path d="M2 14c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
 const DocIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="1" width="10" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M6 5h4M6 8h4M6 11h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
+const StarIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l2 4.2 4.5.6-3.3 3.2.8 4.5L8 11.8l-4 2.2.8-4.5-3.3-3.2 4.5-.6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>;
+const TargetIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="8" cy="8" r="3.3" stroke="currentColor" strokeWidth="1.2"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/></svg>;
+
+function parseContractEnd(s){
+  if(!s) return null;
+  const m = String(s).trim().match(/^(\d{4})-(\d{2})/);
+  return m ? new Date(parseInt(m[1]),parseInt(m[2])-1,1) : null;
+}
+function isRenewalDueSoon(s){
+  const d = parseContractEnd(s);
+  if(!d) return false;
+  const days = Math.floor((d-new Date())/86400000);
+  return days<=60; // includes already-past (should've renewed by now)
+}
+
+function ClientsView({contacts,openContact}){
+  const clients = contacts.filter(c=>c.stage==="Won / Active");
+  const totalValue = clients.reduce((sum,c)=>sum+parseValue(c.estimatedValue),0);
+  const renewalsDue = clients.filter(c=>isRenewalDueSoon(c.contractEnd));
+  return (
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginBottom:16}}>
+        {[{label:"Active clients",value:clients.length},{label:"Total active value",value:formatGBP(totalValue)},{label:"Renewals due (60d)",value:renewalsDue.length,warn:renewalsDue.length>0}].map((m,i)=>(
+          <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:8,padding:"11px 14px"}}>
+            <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{m.label}</div>
+            <div style={{fontSize:22,fontWeight:500,color:m.warn?"#A32D2D":"var(--color-text-primary)"}}>{m.value}</div>
+          </div>
+        ))}
+      </div>
+      {clients.length===0 ? (
+        <div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No active clients yet — move a contact to "Won / Active" to see them here.</div>
+      ) : (
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(240px,1fr))",gap:10}}>
+          {clients.map(c=>{
+            const renewalSoon = isRenewalDueSoon(c.contractEnd);
+            return (
+              <div key={c.id} onClick={()=>openContact(c)} style={{...cardStyle,cursor:"pointer",border:renewalSoon?"1px solid #EF9F27":cardStyle.border}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <Avatar name={c.contactName} size={30}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
+                    <div style={{fontSize:10,color:"var(--color-text-secondary)"}}>{c.contactName}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:10,color:"var(--color-text-secondary)",padding:"3px 0",borderTop:"0.5px solid var(--color-border-tertiary)"}}>
+                  <span>Value</span><span style={{color:"var(--color-text-primary)"}}>{c.estimatedValue?formatGBP(parseValue(c.estimatedValue)):"—"}</span>
+                </div>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:10,padding:"3px 0"}}>
+                  <span style={{color:"var(--color-text-secondary)"}}>Contract end</span>
+                  <span style={{color:renewalSoon?"#A32D2D":"var(--color-text-primary)",fontWeight:renewalSoon?500:400}}>{c.contractEnd||"—"}{renewalSoon?" ⚠":""}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TendersView({tenders,contacts,openContact}){
+  const [search,setSearch]=useState("");
+  const [filterRegion,setFilterRegion]=useState("");
+  const [expandedId,setExpandedId]=useState(null);
+
+  const regions = useMemo(()=>[...new Set(tenders.map(t=>t.region).filter(Boolean))].sort(),[tenders]);
+
+  const filtered = useMemo(()=>{
+    const q = search.toLowerCase();
+    return tenders.filter(t=>{
+      const matchQ = !q || `${t.title} ${t.buyer} ${t.sector}`.toLowerCase().includes(q);
+      return matchQ && (!filterRegion||t.region===filterRegion);
+    }).sort((a,b)=>new Date(a.deadline||"9999-12-31")-new Date(b.deadline||"9999-12-31"));
+  },[tenders,search,filterRegion]);
+
+  if(!tenders.length) return <div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>Loading live tender data…</div>;
+
+  return (
+    <div>
+      <div style={{display:"flex",gap:7,marginBottom:8,flexWrap:"wrap"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search tenders by title, buyer, sector…" style={{flex:1,minWidth:200,...inputStyle}}/>
+        <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={inputStyle}><option value="">All regions</option>{regions.map(r=><option key={r}>{r}</option>)}</select>
+      </div>
+      <div style={{fontSize:11,color:"var(--color-text-tertiary)",marginBottom:8}}>
+        {filtered.length} tender{filtered.length!==1?"s":""}{filterRegion?` in ${filterRegion}`:""}, soonest-closing first{filtered.length>100?" — showing first 100, search to narrow":""}
+      </div>
+      {filtered.slice(0,100).map(t=>{
+        const expanded = expandedId===t.id;
+        const matches = expanded ? matchContactsForTender(contacts,t) : [];
+        return (
+          <div key={t.id} style={{...cardStyle,marginBottom:8,padding:"10px 14px",cursor:"pointer"}} onClick={()=>setExpandedId(expanded?null:t.id)}>
+            <div style={{display:"flex",justifyContent:"space-between",gap:10}}>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.title}</div>
+                <div style={{fontSize:11,color:"var(--color-text-secondary)",marginTop:2,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{t.buyer} · {t.region||"—"} · {t.sector||"—"}</div>
+              </div>
+              <div style={{fontSize:11,color:"var(--color-text-tertiary)",flexShrink:0,textAlign:"right"}}>
+                {t.deadline?<div>closes {new Date(t.deadline).toLocaleDateString("en-GB")}</div>:null}
+                {t.value?<div>{formatGBP(t.value)}</div>:null}
+              </div>
+            </div>
+            {expanded && (
+              <div style={{marginTop:10,paddingTop:10,borderTop:"0.5px solid var(--color-border-tertiary)"}} onClick={e=>e.stopPropagation()}>
+                <div style={{fontSize:10,fontWeight:500,color:"var(--color-text-secondary)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.05em"}}>Matching companies in {t.region||"—"}</div>
+                {matches.length===0 ? <div style={{fontSize:11,color:"var(--color-text-tertiary)"}}>No CRM contacts located in this region yet.</div> :
+                  matches.map(c=>(
+                    <div key={c.id} onClick={()=>openContact(c)} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+                      <Avatar name={c.contactName} size={22}/>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:12,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
+                        <div style={{fontSize:10,color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.notes?c.notes.slice(0,90):c.contactName}</div>
+                      </div>
+                      {(c.tags||[]).includes("tier-1")&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#EEEDFE",color:"#3C3489",flexShrink:0}}>framework</span>}
+                    </div>
+                  ))
+                }
+                <a href={t.url} target="_blank" rel="noreferrer" style={{fontSize:11,color:"#185FA5",display:"inline-block",marginTop:8}}>View full tender →</a>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
