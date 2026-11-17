@@ -5,7 +5,7 @@ import ImportCSVModal from "./ImportCSVModal";
 // ── Palette & helpers ────────────────────────────────────────────────
 const STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
 const SOURCES = ["Scraped","LinkedIn","Framework","Referral","Inbound","Other"];
-const FRAMEWORKS = ["CCS RM6277","CCS RM3749","YPO 660","ESPO 660","Crown Commercial","G-Cloud","Other"];
+const FRAMEWORKS = ["CCS RM6277","CCS RM6290","CCS RM6376","YPO","ESPO","Crown Commercial","G-Cloud","Other"];
 const ACTIVITY_TYPES = ["Email","Call","LinkedIn","Meeting","Note"];
 const TAGS_PRESET = ["warm","key target","re-engage","do not contact","decision maker","framework"];
 const WIN_LOSS_REASONS = {
@@ -204,6 +204,7 @@ export default function HawkeyeCRM({ session }){
   const [filterSource, setFilterSource] = useState("");
   const [filterSize, setFilterSize] = useState("");
   const [filterRegion, setFilterRegion] = useState("");
+  const [filterFramework, setFilterFramework] = useState("");
   const [filterMine, setFilterMine] = useState(false);
   const [contactSort, setContactSort] = useState("newest");
   const [selected, setSelected] = useState([]);
@@ -357,8 +358,9 @@ export default function HawkeyeCRM({ session }){
     const matchQ = !q||haystack.includes(q);
     const matchMine = !filterMine||c.assignedTo===session?.user?.email;
     const matchRegion = !filterRegion||regionFromLocation(c.location)===filterRegion;
-    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine&&matchRegion;
-  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterRegion,filterMine,contactSort,session]);
+    const matchFramework = !filterFramework||(c.frameworks||[]).includes(filterFramework);
+    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine&&matchRegion&&matchFramework;
+  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterRegion,filterFramework,filterMine,contactSort,session]);
 
   const exportCSV = (rows)=>{
     const headers = ["Company","Contact Name","Title","Email","Phone","LinkedIn","Location","Company Size","Website","Industry","Stage","Source","Current Supplier","Contract End","Frameworks","Tags"];
@@ -448,7 +450,7 @@ export default function HawkeyeCRM({ session }){
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
           {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts}/>}
-          {view==="contacts"&&<ContactsView contacts={filteredContacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
+          {view==="contacts"&&<ContactsView contacts={filteredContacts} allContacts={contacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterFramework={filterFramework} setFilterFramework={setFilterFramework} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
           {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
           {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
           {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact} logTenderInterest={logTenderInterest}/>}
@@ -661,7 +663,8 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
   );
 }
 
-function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
+function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterFramework,setFilterFramework,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
+  const availableFrameworks = useMemo(()=>[...new Set(allContacts.flatMap(c=>c.frameworks||[]))].sort(),[allContacts]);
   const [groupByCompany,setGroupByCompany]=useState(false);
   const toggleSelect=(id)=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const allSelected=contacts.length>0&&contacts.every(c=>selected.includes(c.id));
@@ -687,6 +690,7 @@ function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filt
         <select value={filterSource} onChange={e=>setFilterSource(e.target.value)} style={inputStyle}><option value="">All sources</option>{SOURCES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSize} onChange={e=>setFilterSize(e.target.value)} style={inputStyle}><option value="">All sizes</option>{["1-10","11-50","51-200","200+"].map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={inputStyle}><option value="">All regions</option>{UK_REGIONS.map(r=><option key={r}>{r}</option>)}</select>
+        {availableFrameworks.length>0&&<select value={filterFramework} onChange={e=>setFilterFramework(e.target.value)} style={inputStyle}><option value="">All frameworks</option>{availableFrameworks.map(f=><option key={f}>{f}</option>)}</select>}
         <select value={contactSort} onChange={e=>setContactSort(e.target.value)} style={inputStyle}>
           <option value="newest">Sort: Newest added</option>
           <option value="oldest">Sort: Oldest added</option>
@@ -723,7 +727,7 @@ function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filt
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
           <thead><tr style={{borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
             <th style={{width:28,padding:"5px 8px"}}><input type="checkbox" checked={allSelected} onChange={toggleAll}/></th>
-            <th style={thStyle}>Company</th><th style={thStyle}>Contact</th><th style={thStyle}>Stage</th><th style={thStyle}>Tags</th><th style={thStyle}>Supplier</th><th style={thStyle}>Follow-up</th><th style={thStyle}>Source</th>
+            <th style={thStyle}>Company</th><th style={thStyle}>Contact</th><th style={thStyle}>Stage</th><th style={thStyle}>Framework/Tags</th><th style={thStyle}>Supplier</th><th style={thStyle}>Follow-up</th><th style={thStyle}>Source</th>
           </tr></thead>
           <tbody>
             {contacts.map(c=>(
@@ -732,7 +736,10 @@ function ContactsView({contacts,search,setSearch,filterStage,setFilterStage,filt
                 <td style={{padding:"8px",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</td>
                 <td style={{padding:"8px"}}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={c.contactName} size={22}/><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName}</span></div></td>
                 <td style={{padding:"8px"}}><StagePill stage={c.stage} small/></td>
-                <td style={{padding:"8px"}}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>{(c.tags||[]).slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}</div></td>
+                <td style={{padding:"8px"}}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                  {(c.frameworks||[]).slice(0,2).map(f=><span key={f} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#EEEDFE",color:"#3C3489"}}>{f}</span>)}
+                  {(c.tags||[]).filter(t=>t!=="framework"&&!t.startsWith("tier-")).slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}
+                </div></td>
                 <td style={{padding:"8px",fontSize:11,color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.currentSupplier||"—"}</td>
                 <td style={{padding:"8px",fontSize:11,color:isOverdue(c.followUpDate)?"#A32D2D":"var(--color-text-secondary)",fontWeight:isOverdue(c.followUpDate)?500:400}}>{c.followUpDate?daysAgo(c.followUpDate):"Not set"}</td>
                 <td style={{padding:"8px",fontSize:11,color:"var(--color-text-secondary)"}}>{c.source}</td>
