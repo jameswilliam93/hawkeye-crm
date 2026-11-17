@@ -9,7 +9,7 @@ import { useState, useRef, useCallback } from "react";
 const REQUIRED_HEADERS = ["Company", "Contact Name"];
 const VALID_STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
 const VALID_SIZES  = ["1-10","11-50","51-200","200+"];
-const VALID_SOURCES = ["Scraped","LinkedIn","Framework","Referral","Inbound","Other"];
+const VALID_SOURCES = ["Scraped","LinkedIn","Framework","Award Notice","Referral","Inbound","Other"];
 
 // Maps CSV column names → Supabase DB column names
 const COLUMN_MAP = {

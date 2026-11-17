@@ -4,7 +4,7 @@ import ImportCSVModal from "./ImportCSVModal";
 
 // ── Palette & helpers ────────────────────────────────────────────────
 const STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
-const SOURCES = ["Scraped","LinkedIn","Framework","Referral","Inbound","Other"];
+const SOURCES = ["Scraped","LinkedIn","Framework","Award Notice","Referral","Inbound","Other"];
 const FRAMEWORKS = ["CCS RM6277","CCS RM6290","CCS RM6376","YPO","ESPO","Crown Commercial","G-Cloud","Other"];
 const ACTIVITY_TYPES = ["Email","Call","LinkedIn","Meeting","Note"];
 const TAGS_PRESET = ["warm","key target","re-engage","do not contact","decision maker","framework"];
