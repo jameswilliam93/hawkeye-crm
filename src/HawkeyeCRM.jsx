@@ -451,7 +451,7 @@ export default function HawkeyeCRM({ session }){
         <div style={{flex:1,overflowY:"auto",padding:18}}>
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
-          {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts}/>}
+          {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts} updateContact={updateContact}/>}
           {view==="contacts"&&<ContactsView contacts={filteredContacts} allContacts={contacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterFramework={filterFramework} setFilterFramework={setFilterFramework} filterResearched={filterResearched} setFilterResearched={setFilterResearched} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
           {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
           {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
@@ -615,21 +615,59 @@ const CONTACT_SORTS = {
   stale_touch:   (a,b)=>new Date(a.lastContacted||"9999")-new Date(b.lastContacted||"9999"),
 };
 
-function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
-  const [sortBy,setSortBy]=useState("newest");
+function tierOf(c){ return (c.tags||[]).find(t=>t.startsWith("tier-"))||""; }
+function isPriority(c){ return (c.tags||[]).includes("priority"); }
+function togglePriority(c, updateContact){
+  const tags = isPriority(c) ? (c.tags||[]).filter(t=>t!=="priority") : [...(c.tags||[]),"priority"];
+  updateContact(c.id, {tags});
+}
+
+function PipelineView({contacts,openContact,moveStage,setModal,stalContacts,updateContact}){
+  const [sortBy,setSortBy]=useState("priority");
   const [filterRegion,setFilterRegion]=useState("");
+  const [filterTier,setFilterTier]=useState("");
+  const [priorityOnly,setPriorityOnly]=useState(false);
+  const [search,setSearch]=useState("");
   const stalIds = new Set(stalContacts.map(c=>c.id));
-  const visible = filterRegion ? contacts.filter(c=>regionFromLocation(c.location)===filterRegion) : contacts;
+
+  const visible = contacts.filter(c=>{
+    const q = search.toLowerCase();
+    const haystack = [c.company,c.contactName,c.industry,c.notes,...(c.tags||[])].join(" ").toLowerCase();
+    const matchQ = !q||haystack.includes(q);
+    const matchRegion = !filterRegion||regionFromLocation(c.location)===filterRegion;
+    const matchTier = !filterTier||tierOf(c)===filterTier;
+    const matchPriority = !priorityOnly||isPriority(c);
+    return matchQ&&matchRegion&&matchTier&&matchPriority;
+  });
+
+  const sorters = {
+    ...PIPELINE_SORTS,
+    priority: (a,b)=>{
+      const pa = isPriority(a)?0:1, pb = isPriority(b)?0:1;
+      if(pa!==pb) return pa-pb;
+      return PIPELINE_SORTS.newest(a,b);
+    },
+  };
+
   return (
     <div>
       {stalContacts.length>0&&<div style={{background:"#FAEEDA",border:"0.5px solid #EF9F27",borderRadius:8,padding:"8px 12px",marginBottom:12}}><span style={{fontSize:11,color:"#633806"}}>⚠ {stalContacts.length} contact{stalContacts.length>1?"s":""} not touched in 14+ days: {stalContacts.map(c=>c.company).join(", ")}</span></div>}
       {contacts.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts yet. Click "+ Add contact" to get started.</div>}
-      <div style={{display:"flex",justifyContent:"flex-end",gap:7,marginBottom:8}}>
+      <div style={{display:"flex",justifyContent:"flex-end",gap:7,marginBottom:8,flexWrap:"wrap"}}>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" style={{...inputStyle,fontSize:11,width:140}}/>
+        <select value={filterTier} onChange={e=>setFilterTier(e.target.value)} style={{...inputStyle,fontSize:11}}>
+          <option value="">All tiers</option>
+          <option value="tier-1">Tier 1</option>
+          <option value="tier-2">Tier 2</option>
+          <option value="tier-3">Tier 3</option>
+        </select>
         <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={{...inputStyle,fontSize:11}}>
           <option value="">All regions</option>
           {UK_REGIONS.map(r=><option key={r}>{r}</option>)}
         </select>
+        <button onClick={()=>setPriorityOnly(p=>!p)} style={{...btnStyle,fontSize:11,background:priorityOnly?"#185FA5":undefined,color:priorityOnly?"white":undefined,border:priorityOnly?"none":undefined}}>★ Priority only</button>
         <select value={sortBy} onChange={e=>setSortBy(e.target.value)} style={{...inputStyle,fontSize:11}}>
+          <option value="priority">Sort: Priority first</option>
           <option value="newest">Sort: Newest added</option>
           <option value="oldest">Sort: Oldest added</option>
           <option value="az">Sort: Company A–Z</option>
@@ -637,7 +675,7 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
       </div>
       <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:8}}>
         {STAGES.map(stage=>{
-          const cols=visible.filter(c=>c.stage===stage).sort(PIPELINE_SORTS[sortBy]);
+          const cols=visible.filter(c=>c.stage===stage).sort(sorters[sortBy]);
           const {bg,color}=STAGE_STYLE[stage];
           return (
             <div key={stage} style={{minWidth:168,flexShrink:0}}>
@@ -646,14 +684,15 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
                 <span style={{fontSize:10,background:"rgba(0,0,0,.07)",padding:"1px 5px",borderRadius:8,flexShrink:0,marginLeft:4}}>{cols.length}</span>
               </div>
               {cols.map(c=>(
-                <div key={c.id} onClick={()=>openContact(c)} style={{background:"var(--color-background-primary)",border:stalIds.has(c.id)?"1px solid #EF9F27":"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"9px",marginBottom:5,cursor:"pointer",opacity:stage==="Lost / Dead"?0.55:1}}>
-                  <div style={{fontSize:12,fontWeight:500,marginBottom:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
+                <div key={c.id} onClick={()=>openContact(c)} style={{background:"var(--color-background-primary)",border:stalIds.has(c.id)?"1px solid #EF9F27":"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"9px",marginBottom:5,cursor:"pointer",opacity:stage==="Lost / Dead"?0.55:1,position:"relative"}}>
+                  <span onClick={e=>{e.stopPropagation();togglePriority(c,updateContact);}} title={isPriority(c)?"Remove priority":"Mark as priority"} style={{position:"absolute",top:7,right:7,fontSize:13,color:isPriority(c)?"#EF9F27":"var(--color-border-secondary)",cursor:"pointer"}}>★</span>
+                  <div style={{fontSize:12,fontWeight:500,marginBottom:1,paddingRight:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
                   <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName} · {c.title}</div>
                   <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
                     <span style={{fontSize:10,padding:"2px 5px",borderRadius:6,background:"var(--color-background-secondary)",color:"var(--color-text-secondary)"}}>{c.source}</span>
                     <span style={{fontSize:10,color:isOverdue(c.followUpDate)?"#A32D2D":stalIds.has(c.id)?"#854F0B":"var(--color-text-tertiary)",fontWeight:isOverdue(c.followUpDate)?500:400}}>{isOverdue(c.followUpDate)?"Overdue":stalIds.has(c.id)?"Stale":daysAgo(c.addedDate)||""}</span>
                   </div>
-                  {(c.tags||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{c.tags.slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}</div>}
+                  {(c.tags||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{c.tags.filter(t=>t!=="priority").slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}</div>}
                 </div>
               ))}
               <button onClick={()=>setModal({type:"addContact",stage})} style={{width:"100%",border:"0.5px dashed var(--color-border-secondary)",borderRadius:8,padding:"6px",fontSize:11,color:"var(--color-text-tertiary)",background:"transparent",cursor:"pointer",marginTop:2}}>+ Add here</button>
