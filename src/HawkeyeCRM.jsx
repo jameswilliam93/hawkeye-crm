@@ -514,6 +514,7 @@ function formatGBP(n){
 function DashboardView({contacts,openContact}){
   const stageCounts = STAGES.map(s=>({stage:s,count:contacts.filter(c=>c.stage===s).length}));
   const overdue = contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage)&&isOverdue(c.followUpDate));
+  const renewalRadar = contacts.filter(c=>!["Won / Active","Lost / Dead"].includes(c.stage)&&isRenewalDueSoon(c.contractEnd)).sort((a,b)=>parseContractEnd(a.contractEnd)-parseContractEnd(b.contractEnd));
   const recentActs = contacts.flatMap(c=>(c.activities||[]).map(a=>({...a,company:c.company,contactId:c.id}))).sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,6);
   const barMax = Math.max(...stageCounts.map(s=>s.count),1);
   const BAR_COLORS = {"New Lead":"#B5D4F4","Researched":"#CECBF6","Contacted":"#FAC775","Follow-up Due":"#F09595","Meeting Booked":"#C0DD97","Proposal Sent":"#F4C0D1","Won / Active":"#5DCAA5","Lost / Dead":"#D3D1C7"};
@@ -552,6 +553,18 @@ function DashboardView({contacts,openContact}){
               <Avatar name={c.contactName} size={24}/>
               <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div><div style={{fontSize:10,color:"var(--color-text-secondary)"}}>{c.contactName}</div></div>
               <div style={{fontSize:10,color:"#A32D2D",fontWeight:500}}>{daysAgo(c.followUpDate)}</div>
+            </div>
+          ))}
+        </div>
+        <div style={cardStyle}>
+          <div style={{fontSize:12,fontWeight:500,marginBottom:10}}>Renewals due — prospects{renewalRadar.length>0?` (${renewalRadar.length})`:""}</div>
+          <div style={{fontSize:10,color:"var(--color-text-tertiary)",marginBottom:renewalRadar.length>0?8:0,marginTop:-4}}>Current supplier's contract ending soon — the window to pitch before they renew.</div>
+          {renewalRadar.length===0?<div style={{fontSize:12,color:"var(--color-text-tertiary)",padding:"12px 0"}}>None flagged. Add "Contract end" when you research a prospect to see them here.</div>:
+          renewalRadar.slice(0,4).map(c=>(
+            <div key={c.id} onClick={()=>openContact(c)} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}}>
+              <Avatar name={c.contactName} size={24}/>
+              <div style={{flex:1,overflow:"hidden"}}><div style={{fontSize:11,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div><div style={{fontSize:10,color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.currentSupplier?`with ${c.currentSupplier}`:c.contactName}</div></div>
+              <div style={{fontSize:10,color:"#854F0B",fontWeight:500,flexShrink:0}}>{c.contractEnd}</div>
             </div>
           ))}
         </div>
