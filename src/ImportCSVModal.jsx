@@ -33,34 +33,45 @@ const COLUMN_MAP = {
 };
 
 function parseCSV(text) {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return { headers: [], rows: [] };
+  // A single-pass, quote-aware parser — a field wrapped in quotes may
+  // legally contain commas AND newlines (RFC 4180), so row boundaries can
+  // only be decided while tracking quote state across the whole file, not
+  // by splitting into lines first (that was the previous approach here,
+  // and it silently corrupted any row whose Notes field had a line break —
+  // shifting every column after it rather than erroring).
+  const rawRows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+  const input = text.trim();
 
-  // Parse a single CSV line respecting quoted fields
-  const parseLine = (line) => {
-    const result = [];
-    let field = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const ch = line[i];
-      if (ch === '"' && !inQuotes) { inQuotes = true; continue; }
-      if (ch === '"' && inQuotes) {
-        if (line[i + 1] === '"') { field += '"'; i++; }
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (input[i + 1] === '"') { field += '"'; i++; }
         else inQuotes = false;
-        continue;
+      } else {
+        field += ch;
       }
-      if (ch === "," && !inQuotes) { result.push(field.trim()); field = ""; continue; }
-      field += ch;
+      continue;
     }
-    result.push(field.trim());
-    return result;
-  };
+    if (ch === '"') { inQuotes = true; continue; }
+    if (ch === ",") { row.push(field); field = ""; continue; }
+    if (ch === "\r") { continue; }
+    if (ch === "\n") { row.push(field); rawRows.push(row); row = []; field = ""; continue; }
+    field += ch;
+  }
+  row.push(field);
+  rawRows.push(row);
 
-  const headers = parseLine(lines[0]);
-  const rows = lines.slice(1).filter(l => l.trim()).map(l => {
-    const vals = parseLine(l);
+  const nonEmptyRows = rawRows.filter(r => r.some(v => v.trim() !== ""));
+  if (nonEmptyRows.length < 2) return { headers: [], rows: [] };
+
+  const headers = nonEmptyRows[0].map(v => v.trim());
+  const rows = nonEmptyRows.slice(1).map(vals => {
     const obj = {};
-    headers.forEach((h, i) => { obj[h] = vals[i] || ""; });
+    headers.forEach((h, i) => { obj[h] = (vals[i] || "").trim(); });
     return obj;
   });
 
