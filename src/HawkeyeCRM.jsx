@@ -205,6 +205,7 @@ export default function HawkeyeCRM({ session }){
   const [filterSize, setFilterSize] = useState("");
   const [filterRegion, setFilterRegion] = useState("");
   const [filterFramework, setFilterFramework] = useState("");
+  const [filterResearched, setFilterResearched] = useState("");
   const [filterMine, setFilterMine] = useState(false);
   const [contactSort, setContactSort] = useState("newest");
   const [selected, setSelected] = useState([]);
@@ -354,13 +355,14 @@ export default function HawkeyeCRM({ session }){
 
   const filteredContacts = useMemo(()=>contacts.filter(c=>{
     const q = search.toLowerCase();
-    const haystack = [c.company,c.contactName,c.industry,c.location,c.currentSupplier,...(c.tags||[]),...(c.frameworks||[])].join(" ").toLowerCase();
+    const haystack = [c.company,c.contactName,c.industry,c.location,c.currentSupplier,c.notes,...(c.tags||[]),...(c.frameworks||[])].join(" ").toLowerCase();
     const matchQ = !q||haystack.includes(q);
     const matchMine = !filterMine||c.assignedTo===session?.user?.email;
     const matchRegion = !filterRegion||regionFromLocation(c.location)===filterRegion;
     const matchFramework = !filterFramework||(c.frameworks||[]).includes(filterFramework);
-    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine&&matchRegion&&matchFramework;
-  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterRegion,filterFramework,filterMine,contactSort,session]);
+    const matchResearched = !filterResearched||(filterResearched==="yes"?!!c.notes:!c.notes);
+    return matchQ&&(!filterStage||c.stage===filterStage)&&(!filterSource||c.source===filterSource)&&(!filterSize||c.companySize===filterSize)&&matchMine&&matchRegion&&matchFramework&&matchResearched;
+  }).sort(CONTACT_SORTS[contactSort]),[contacts,search,filterStage,filterSource,filterSize,filterRegion,filterFramework,filterResearched,filterMine,contactSort,session]);
 
   const exportCSV = (rows)=>{
     const headers = ["Company","Contact Name","Title","Email","Phone","LinkedIn","Location","Company Size","Website","Industry","Stage","Source","Current Supplier","Contract End","Frameworks","Tags"];
@@ -450,7 +452,7 @@ export default function HawkeyeCRM({ session }){
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
           {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts}/>}
-          {view==="contacts"&&<ContactsView contacts={filteredContacts} allContacts={contacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterFramework={filterFramework} setFilterFramework={setFilterFramework} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
+          {view==="contacts"&&<ContactsView contacts={filteredContacts} allContacts={contacts} search={search} setSearch={setSearch} filterStage={filterStage} setFilterStage={setFilterStage} filterSource={filterSource} setFilterSource={setFilterSource} filterSize={filterSize} setFilterSize={setFilterSize} filterRegion={filterRegion} setFilterRegion={setFilterRegion} filterFramework={filterFramework} setFilterFramework={setFilterFramework} filterResearched={filterResearched} setFilterResearched={setFilterResearched} filterMine={filterMine} setFilterMine={setFilterMine} contactSort={contactSort} setContactSort={setContactSort} selected={selected} setSelected={setSelected} openContact={openContact}/>}
           {view==="contact"&&contact&&<ContactProfile contact={contact} updateContact={updateContact} moveStage={moveStage} newActivity={newActivity} setNewActivity={setNewActivity} logActivity={logActivity} setView={setView} setModal={setModal} templates={templates} tenders={tenders} deleteContact={deleteContact}/>}
           {view==="clients"&&<ClientsView contacts={contacts} openContact={openContact}/>}
           {view==="tenders"&&<TendersView tenders={tenders} contacts={contacts} openContact={openContact} logTenderInterest={logTenderInterest}/>}
@@ -663,7 +665,7 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts}){
   );
 }
 
-function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterFramework,setFilterFramework,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
+function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterFramework,setFilterFramework,filterResearched,setFilterResearched,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
   const availableFrameworks = useMemo(()=>[...new Set(allContacts.flatMap(c=>c.frameworks||[]))].sort(),[allContacts]);
   const [groupByCompany,setGroupByCompany]=useState(false);
   const toggleSelect=(id)=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
@@ -685,12 +687,17 @@ function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilt
   return (
     <div>
       <div style={{display:"flex",gap:7,marginBottom:12,flexWrap:"wrap"}}>
-        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search company, contact, industry, location, tags…" style={{flex:1,minWidth:180,...inputStyle}}/>
+        <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search company, contact, industry, location, specialism notes, tags…" style={{flex:1,minWidth:180,...inputStyle}}/>
         <select value={filterStage} onChange={e=>setFilterStage(e.target.value)} style={inputStyle}><option value="">All stages</option>{STAGES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSource} onChange={e=>setFilterSource(e.target.value)} style={inputStyle}><option value="">All sources</option>{SOURCES.map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterSize} onChange={e=>setFilterSize(e.target.value)} style={inputStyle}><option value="">All sizes</option>{["1-10","11-50","51-200","200+"].map(s=><option key={s}>{s}</option>)}</select>
         <select value={filterRegion} onChange={e=>setFilterRegion(e.target.value)} style={inputStyle}><option value="">All regions</option>{UK_REGIONS.map(r=><option key={r}>{r}</option>)}</select>
         {availableFrameworks.length>0&&<select value={filterFramework} onChange={e=>setFilterFramework(e.target.value)} style={inputStyle}><option value="">All frameworks</option>{availableFrameworks.map(f=><option key={f}>{f}</option>)}</select>}
+        <select value={filterResearched} onChange={e=>setFilterResearched(e.target.value)} style={inputStyle}>
+          <option value="">Researched: all</option>
+          <option value="yes">Researched: yes</option>
+          <option value="no">Researched: not yet</option>
+        </select>
         <select value={contactSort} onChange={e=>setContactSort(e.target.value)} style={inputStyle}>
           <option value="newest">Sort: Newest added</option>
           <option value="oldest">Sort: Oldest added</option>
@@ -733,7 +740,10 @@ function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilt
             {contacts.map(c=>(
               <tr key={c.id} onClick={()=>openContact(c)} style={{borderBottom:"0.5px solid var(--color-border-tertiary)",cursor:"pointer"}} onMouseEnter={e=>e.currentTarget.style.background="var(--color-background-secondary)"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
                 <td style={{padding:"8px"}} onClick={e=>e.stopPropagation()}><input type="checkbox" checked={selected.includes(c.id)} onChange={()=>toggleSelect(c.id)}/></td>
-                <td style={{padding:"8px",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</td>
+                <td style={{padding:"8px",fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>
+                  <span title={c.notes?"Has research notes":"No research notes yet"} style={{display:"inline-block",width:6,height:6,borderRadius:"50%",marginRight:6,flexShrink:0,background:c.notes?"#1D9E75":"transparent",border:c.notes?"none":"1px solid var(--color-border-secondary)"}}/>
+                  {c.company}
+                </td>
                 <td style={{padding:"8px"}}><div style={{display:"flex",alignItems:"center",gap:6}}><Avatar name={c.contactName} size={22}/><span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName}</span></div></td>
                 <td style={{padding:"8px"}}><StagePill stage={c.stage} small/></td>
                 <td style={{padding:"8px"}}><div style={{display:"flex",flexWrap:"wrap",gap:3}}>
