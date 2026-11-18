@@ -1,0 +1,176 @@
+/* The app's inline styles reference --color-* custom properties
+   (e.g. var(--color-background-primary)) throughout, but they were never
+   defined anywhere, so they always resolved to transparent/inherit. That
+   was invisible on the old single-pane desktop layout, but it broke the
+   new mobile nav drawer below (an opaque sidebar stacked over content),
+   so it's defined here — values chosen to match the hex colors already
+   hardcoded elsewhere in the app (Login.jsx, Modal). */
+:root {
+  --color-background-primary: #ffffff;
+  --color-background-secondary: #F4F5F7;
+  --color-background-tertiary: #ECEDF0;
+  --color-text-primary: #1A1A1A;
+  --color-text-secondary: #666666;
+  --color-text-tertiary: #8A8A8E;
+  --color-border-primary: #D0D0D0;
+  --color-border-secondary: #D0D0D0;
+  --color-border-tertiary: #E7E7E9;
+}
+
+/* Mobile layout overrides for HawkeyeCRM. The app is built with inline
+   styles sized for desktop; these rules patch specific properties for
+   narrow viewports. !important is needed throughout because inline
+   style attributes otherwise always win over an external stylesheet. */
+
+html, body {
+  overflow-x: hidden;
+}
+
+.hc-hamburger {
+  display: none;
+}
+
+.hc-nav-overlay {
+  display: none;
+}
+
+@media (max-width: 680px) {
+  .hc-shell {
+    height: 100dvh !important;
+  }
+
+  .hc-hamburger {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-primary);
+    padding: 0;
+  }
+
+  .hc-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 240px !important;
+    max-width: 80vw;
+    transform: translateX(-100%);
+    transition: transform 0.18s ease;
+    z-index: 500;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.2);
+  }
+
+  .hc-sidebar.hc-sidebar-open {
+    transform: translateX(0);
+  }
+
+  .hc-nav-overlay.hc-nav-overlay-open {
+    display: block;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 499;
+  }
+
+  .hc-topbar {
+    height: auto !important;
+    min-height: 50px;
+    flex-wrap: wrap;
+    padding: 8px 12px !important;
+    gap: 8px;
+  }
+
+  .hc-topbar-title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+
+  .hc-topbar-actions {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+
+  .hc-topbar-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hc-topbar-actions > * {
+    flex-shrink: 0;
+  }
+
+  .hc-main {
+    padding: 12px !important;
+  }
+
+  .hc-stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .hc-dash-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .hc-pipeline-toolbar {
+    justify-content: flex-start !important;
+  }
+
+  .hc-pipeline-toolbar select,
+  .hc-pipeline-toolbar input {
+    flex: 1 1 auto;
+  }
+
+  .hc-table-wrap {
+    display: none !important;
+  }
+
+  .hc-profile-layout {
+    flex-direction: column !important;
+  }
+
+  .hc-profile-aside {
+    width: 100% !important;
+  }
+
+  .hc-profile-header {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .hc-star-toggle {
+    padding: 9px !important;
+    top: 0 !important;
+    right: 0 !important;
+  }
+
+  .hc-modal-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .hc-shell button,
+  .hc-shell select {
+    min-height: 34px;
+  }
+
+  input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+  }
+}
+
+@media (min-width: 681px) {
+  .hc-mobile-only {
+    display: none !important;
+  }
+}

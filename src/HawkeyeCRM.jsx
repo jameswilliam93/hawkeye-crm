@@ -1,6 +1,19 @@
 import { useState, useMemo, useEffect, useCallback } from "react";
 import { supabase } from "./supabase";
 import ImportCSVModal from "./ImportCSVModal";
+import "./responsive.css";
+
+function useIsMobile(breakpoint = 680) {
+  const query = `(max-width: ${breakpoint}px)`;
+  const [isMobile, setIsMobile] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const handler = () => setIsMobile(mq.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [query]);
+  return isMobile;
+}
 
 // ── Palette & helpers ────────────────────────────────────────────────
 const STAGES = ["New Lead","Researched","Contacted","Follow-up Due","Meeting Booked","Proposal Sent","Won / Active","Lost / Dead"];
@@ -212,10 +225,12 @@ export default function HawkeyeCRM({ session }){
   const [newActivity, setNewActivity] = useState({type:"Email",note:""});
   const [toastMsg, setToastMsg] = useState("");
   const [tenders, setTenders] = useState([]);
+  const [navOpen, setNavOpen] = useState(false);
 
   const toast = (msg)=>{ setToastMsg(msg); setTimeout(()=>setToastMsg(""),2500); };
   const closeModal = ()=>setModal(null);
   const openContact = (c)=>{ setSelectedContact(c.id); setView("contact"); };
+  const goToView = (id)=>{ setView(id); setNavOpen(false); };
 
   const loadData = useCallback(async ()=>{
     setLoading(true);
@@ -397,8 +412,9 @@ export default function HawkeyeCRM({ session }){
   if(loading) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"system-ui",color:"#888",fontSize:13}}>Loading HawkeyeCRM…</div>;
 
   return (
-    <div style={{display:"flex",height:"100vh",fontFamily:"'DM Sans', system-ui, sans-serif",background:"var(--color-background-tertiary)",fontSize:13,color:"var(--color-text-primary)"}}>
-      <div style={{width:192,flexShrink:0,background:"var(--color-background-primary)",borderRight:"0.5px solid var(--color-border-tertiary)",display:"flex",flexDirection:"column",padding:"16px 0"}}>
+    <div className="hc-shell" style={{display:"flex",height:"100vh",fontFamily:"'DM Sans', system-ui, sans-serif",background:"var(--color-background-tertiary)",fontSize:13,color:"var(--color-text-primary)"}}>
+      <div className={`hc-nav-overlay${navOpen?" hc-nav-overlay-open":""}`} onClick={()=>setNavOpen(false)}/>
+      <div className={`hc-sidebar${navOpen?" hc-sidebar-open":""}`} style={{width:192,flexShrink:0,background:"var(--color-background-primary)",borderRight:"0.5px solid var(--color-border-tertiary)",display:"flex",flexDirection:"column",padding:"16px 0"}}>
         <div style={{padding:"0 16px 16px",borderBottom:"0.5px solid var(--color-border-tertiary)",marginBottom:8}}>
           <div style={{display:"flex",alignItems:"center",gap:7}}>
             <div style={{width:22,height:22,borderRadius:"50%",background:"#185FA5",display:"flex",alignItems:"center",justifyContent:"center"}}><div style={{width:8,height:8,borderRadius:"50%",background:"white"}}/></div>
@@ -408,7 +424,7 @@ export default function HawkeyeCRM({ session }){
         </div>
         <div style={{flex:1,padding:"4px 0"}}>
           {navItems.map(n=>(
-            <div key={n.id} onClick={()=>setView(n.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 16px",fontSize:12,cursor:"pointer",color:view===n.id?"#185FA5":"var(--color-text-secondary)",background:view===n.id?"var(--color-background-secondary)":"transparent",borderRight:view===n.id?"2px solid #185FA5":"2px solid transparent",fontWeight:view===n.id?500:400}}>
+            <div key={n.id} onClick={()=>goToView(n.id)} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 16px",fontSize:12,cursor:"pointer",color:view===n.id?"#185FA5":"var(--color-text-secondary)",background:view===n.id?"var(--color-background-secondary)":"transparent",borderRight:view===n.id?"2px solid #185FA5":"2px solid transparent",fontWeight:view===n.id?500:400}}>
               <span style={{opacity:view===n.id?1:0.6,display:"flex"}}>{n.icon}</span>
               {n.label}
               {n.badge?<span style={{marginLeft:"auto",background:"#FCEBEB",color:"#A32D2D",fontSize:10,fontWeight:600,padding:"1px 5px",borderRadius:8}}>{n.badge}</span>:null}
@@ -423,16 +439,19 @@ export default function HawkeyeCRM({ session }){
               <div style={{fontSize:10,color:"var(--color-text-tertiary)"}}>Admin</div>
             </div>
           </div>
-          <button onClick={signOut} style={{...btnStyle,width:"100%",fontSize:11,textAlign:"center"}}>Sign out</button>
+          <button onClick={signOut} style={{...btnStyle,width:"100%",fontSize:11,textAlign:"center",minHeight:36}}>Sign out</button>
         </div>
       </div>
 
-      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
-        <div style={{background:"var(--color-background-primary)",borderBottom:"0.5px solid var(--color-border-tertiary)",padding:"0 20px",height:50,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <span style={{fontSize:14,fontWeight:500}}>
-            {view==="contact"&&contact?`${contact.company} — ${contact.contactName}`:view==="dashboard"?"Dashboard":view==="followups"?"Follow-ups":view==="pipeline"?"Pipeline":view==="contacts"?"Contacts":view==="clients"?"Active Clients":view==="tenders"?"Tender Matches":"Templates"}
-          </span>
-          <div style={{display:"flex",gap:8}}>
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden",minWidth:0}}>
+        <div className="hc-topbar" style={{background:"var(--color-background-primary)",borderBottom:"0.5px solid var(--color-border-tertiary)",padding:"0 20px",height:50,display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:4,minWidth:0}}>
+            <button className="hc-hamburger" onClick={()=>setNavOpen(o=>!o)} aria-label="Open menu"><MenuIcon/></button>
+            <span className="hc-topbar-title" style={{fontSize:14,fontWeight:500}}>
+              {view==="contact"&&contact?`${contact.company} — ${contact.contactName}`:view==="dashboard"?"Dashboard":view==="followups"?"Follow-ups":view==="pipeline"?"Pipeline":view==="contacts"?"Contacts":view==="clients"?"Active Clients":view==="tenders"?"Tender Matches":"Templates"}
+            </span>
+          </div>
+          <div className="hc-topbar-actions" style={{display:"flex",gap:8}}>
             {view==="contacts"&&selected.length>0&&(
               <>
                 <select onChange={e=>{if(e.target.value){bulkStage(e.target.value);e.target.value=""}}} style={btnStyle} defaultValue="">
@@ -448,7 +467,7 @@ export default function HawkeyeCRM({ session }){
           </div>
         </div>
 
-        <div style={{flex:1,overflowY:"auto",padding:18}}>
+        <div className="hc-main" style={{flex:1,overflowY:"auto",padding:18}}>
           {view==="dashboard"&&<DashboardView contacts={contacts} openContact={openContact}/>}
           {view==="followups"&&<FollowupsView contacts={contacts} openContact={openContact} updateContact={updateContact} toast={toast}/>}
           {view==="pipeline"&&<PipelineView contacts={contacts} openContact={openContact} moveStage={moveStage} setModal={setModal} stalContacts={stalContacts} updateContact={updateContact}/>}
@@ -504,7 +523,7 @@ function DashboardView({contacts,openContact}){
   const sourceMax = Math.max(...sourceCounts.map(s=>s.count),1);
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:10,marginBottom:16}}>
+      <div className="hc-stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(5,minmax(0,1fr))",gap:10,marginBottom:16}}>
         {[{label:"Total contacts",value:contacts.length},{label:"Active pipeline",value:activeContacts.length},{label:"Pipeline value",value:formatGBP(pipelineValue)},{label:"Won / active",value:contacts.filter(c=>c.stage==="Won / Active").length,up:true},{label:"Overdue follow-ups",value:overdue.length,warn:overdue.length>0}].map((m,i)=>(
           <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:8,padding:"11px 14px"}}>
             <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{m.label}</div>
@@ -512,7 +531,7 @@ function DashboardView({contacts,openContact}){
           </div>
         ))}
       </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+      <div className="hc-dash-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
         <div style={cardStyle}>
           <div style={{fontSize:12,fontWeight:500,marginBottom:12}}>Pipeline breakdown</div>
           <div style={{display:"flex",gap:5,alignItems:"flex-end",height:80}}>
@@ -580,7 +599,7 @@ function FollowupsView({contacts,openContact,updateContact,toast}){
   );
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginBottom:16}}>
+      <div className="hc-stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginBottom:16}}>
         {[{label:"Overdue",value:overdue.length,warn:true},{label:"Due today",value:contacts.filter(c=>c.followUpDate===today).length},{label:"This week",value:upcoming.length}].map((m,i)=>(
           <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:8,padding:"11px 14px"}}>
             <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{m.label}</div>
@@ -628,6 +647,8 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts,upda
   const [filterTier,setFilterTier]=useState("");
   const [priorityOnly,setPriorityOnly]=useState(false);
   const [search,setSearch]=useState("");
+  const [mobileStage,setMobileStage]=useState(STAGES[0]);
+  const isMobile = useIsMobile();
   const stalIds = new Set(stalContacts.map(c=>c.id));
 
   const visible = contacts.filter(c=>{
@@ -649,11 +670,24 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts,upda
     },
   };
 
+  const renderCard = (c, stage)=>(
+    <div key={c.id} onClick={()=>openContact(c)} style={{background:"var(--color-background-primary)",border:stalIds.has(c.id)?"1px solid #EF9F27":"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"9px",marginBottom:5,cursor:"pointer",opacity:stage==="Lost / Dead"?0.55:1,position:"relative"}}>
+      <span className="hc-star-toggle" onClick={e=>{e.stopPropagation();togglePriority(c,updateContact);}} title={isPriority(c)?"Remove priority":"Mark as priority"} style={{position:"absolute",top:7,right:7,fontSize:13,color:isPriority(c)?"#EF9F27":"var(--color-border-secondary)",cursor:"pointer"}}>★</span>
+      <div style={{fontSize:12,fontWeight:500,marginBottom:1,paddingRight:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
+      <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName} · {c.title}</div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <span style={{fontSize:10,padding:"2px 5px",borderRadius:6,background:"var(--color-background-secondary)",color:"var(--color-text-secondary)"}}>{c.source}</span>
+        <span style={{fontSize:10,color:isOverdue(c.followUpDate)?"#A32D2D":stalIds.has(c.id)?"#854F0B":"var(--color-text-tertiary)",fontWeight:isOverdue(c.followUpDate)?500:400}}>{isOverdue(c.followUpDate)?"Overdue":stalIds.has(c.id)?"Stale":daysAgo(c.addedDate)||""}</span>
+      </div>
+      {(c.tags||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{c.tags.filter(t=>t!=="priority").slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}</div>}
+    </div>
+  );
+
   return (
     <div>
       {stalContacts.length>0&&<div style={{background:"#FAEEDA",border:"0.5px solid #EF9F27",borderRadius:8,padding:"8px 12px",marginBottom:12}}><span style={{fontSize:11,color:"#633806"}}>⚠ {stalContacts.length} contact{stalContacts.length>1?"s":""} not touched in 14+ days: {stalContacts.map(c=>c.company).join(", ")}</span></div>}
       {contacts.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts yet. Click "+ Add contact" to get started.</div>}
-      <div style={{display:"flex",justifyContent:"flex-end",gap:7,marginBottom:8,flexWrap:"wrap"}}>
+      <div className="hc-pipeline-toolbar" style={{display:"flex",justifyContent:"flex-end",gap:7,marginBottom:8,flexWrap:"wrap"}}>
         <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…" style={{...inputStyle,fontSize:11,width:140}}/>
         <select value={filterTier} onChange={e=>setFilterTier(e.target.value)} style={{...inputStyle,fontSize:11}}>
           <option value="">All tiers</option>
@@ -673,33 +707,42 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts,upda
           <option value="az">Sort: Company A–Z</option>
         </select>
       </div>
-      <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:8}}>
-        {STAGES.map(stage=>{
-          const cols=visible.filter(c=>c.stage===stage).sort(sorters[sortBy]);
-          const {bg,color}=STAGE_STYLE[stage];
-          return (
-            <div key={stage} style={{minWidth:168,flexShrink:0}}>
-              <div style={{fontSize:11,fontWeight:500,padding:"5px 9px",borderRadius:8,marginBottom:8,background:bg,color,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{stage}</span>
-                <span style={{fontSize:10,background:"rgba(0,0,0,.07)",padding:"1px 5px",borderRadius:8,flexShrink:0,marginLeft:4}}>{cols.length}</span>
-              </div>
-              {cols.map(c=>(
-                <div key={c.id} onClick={()=>openContact(c)} style={{background:"var(--color-background-primary)",border:stalIds.has(c.id)?"1px solid #EF9F27":"0.5px solid var(--color-border-tertiary)",borderRadius:8,padding:"9px",marginBottom:5,cursor:"pointer",opacity:stage==="Lost / Dead"?0.55:1,position:"relative"}}>
-                  <span onClick={e=>{e.stopPropagation();togglePriority(c,updateContact);}} title={isPriority(c)?"Remove priority":"Mark as priority"} style={{position:"absolute",top:7,right:7,fontSize:13,color:isPriority(c)?"#EF9F27":"var(--color-border-secondary)",cursor:"pointer"}}>★</span>
-                  <div style={{fontSize:12,fontWeight:500,marginBottom:1,paddingRight:16,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</div>
-                  <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.contactName} · {c.title}</div>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                    <span style={{fontSize:10,padding:"2px 5px",borderRadius:6,background:"var(--color-background-secondary)",color:"var(--color-text-secondary)"}}>{c.source}</span>
-                    <span style={{fontSize:10,color:isOverdue(c.followUpDate)?"#A32D2D":stalIds.has(c.id)?"#854F0B":"var(--color-text-tertiary)",fontWeight:isOverdue(c.followUpDate)?500:400}}>{isOverdue(c.followUpDate)?"Overdue":stalIds.has(c.id)?"Stale":daysAgo(c.addedDate)||""}</span>
-                  </div>
-                  {(c.tags||[]).length>0&&<div style={{marginTop:5,display:"flex",flexWrap:"wrap",gap:3}}>{c.tags.filter(t=>t!=="priority").slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}</div>}
+      {isMobile ? (
+        <div>
+          <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:8,marginBottom:8,WebkitOverflowScrolling:"touch"}}>
+            {STAGES.map(stage=>{
+              const count = visible.filter(c=>c.stage===stage).length;
+              const {bg,color} = STAGE_STYLE[stage];
+              const active = mobileStage===stage;
+              return (
+                <button key={stage} onClick={()=>setMobileStage(stage)} style={{flexShrink:0,fontSize:11,fontWeight:500,padding:"8px 13px",borderRadius:20,border:active?"none":"0.5px solid var(--color-border-secondary)",background:active?color:bg,color:active?"white":color,cursor:"pointer"}}>
+                  {stage} <span style={{opacity:0.75}}>({count})</span>
+                </button>
+              );
+            })}
+          </div>
+          {visible.filter(c=>c.stage===mobileStage).sort(sorters[sortBy]).map(c=>renderCard(c,mobileStage))}
+          {visible.filter(c=>c.stage===mobileStage).length===0&&<div style={{textAlign:"center",padding:"32px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts in {mobileStage}.</div>}
+          <button onClick={()=>setModal({type:"addContact",stage:mobileStage})} style={{width:"100%",border:"0.5px dashed var(--color-border-secondary)",borderRadius:8,padding:"10px",fontSize:12,color:"var(--color-text-tertiary)",background:"transparent",cursor:"pointer",marginTop:4}}>+ Add to {mobileStage}</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:9,overflowX:"auto",paddingBottom:8}}>
+          {STAGES.map(stage=>{
+            const cols=visible.filter(c=>c.stage===stage).sort(sorters[sortBy]);
+            const {bg,color}=STAGE_STYLE[stage];
+            return (
+              <div key={stage} style={{minWidth:168,flexShrink:0}}>
+                <div style={{fontSize:11,fontWeight:500,padding:"5px 9px",borderRadius:8,marginBottom:8,background:bg,color,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                  <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:110}}>{stage}</span>
+                  <span style={{fontSize:10,background:"rgba(0,0,0,.07)",padding:"1px 5px",borderRadius:8,flexShrink:0,marginLeft:4}}>{cols.length}</span>
                 </div>
-              ))}
-              <button onClick={()=>setModal({type:"addContact",stage})} style={{width:"100%",border:"0.5px dashed var(--color-border-secondary)",borderRadius:8,padding:"6px",fontSize:11,color:"var(--color-text-tertiary)",background:"transparent",cursor:"pointer",marginTop:2}}>+ Add here</button>
-            </div>
-          );
-        })}
-      </div>
+                {cols.map(c=>renderCard(c,stage))}
+                <button onClick={()=>setModal({type:"addContact",stage})} style={{width:"100%",border:"0.5px dashed var(--color-border-secondary)",borderRadius:8,padding:"6px",fontSize:11,color:"var(--color-text-tertiary)",background:"transparent",cursor:"pointer",marginTop:2}}>+ Add here</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -707,6 +750,7 @@ function PipelineView({contacts,openContact,moveStage,setModal,stalContacts,upda
 function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilterStage,filterSource,setFilterSource,filterSize,setFilterSize,filterRegion,setFilterRegion,filterFramework,setFilterFramework,filterResearched,setFilterResearched,filterMine,setFilterMine,contactSort,setContactSort,selected,setSelected,openContact}){
   const availableFrameworks = useMemo(()=>[...new Set(allContacts.flatMap(c=>c.frameworks||[]))].sort(),[allContacts]);
   const [groupByCompany,setGroupByCompany]=useState(false);
+  const isMobile = useIsMobile();
   const toggleSelect=(id)=>setSelected(s=>s.includes(id)?s.filter(x=>x!==id):[...s,id]);
   const allSelected=contacts.length>0&&contacts.every(c=>selected.includes(c.id));
   const toggleAll=()=>setSelected(allSelected?[]:contacts.map(c=>c.id));
@@ -768,8 +812,34 @@ function ContactsView({contacts,allContacts,search,setSearch,filterStage,setFilt
           ))}
           {contacts.length===0&&<div style={{textAlign:"center",padding:"32px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts match your filters.</div>}
         </div>
+      ) : isMobile ? (
+        <div>
+          {contacts.map(c=>(
+            <div key={c.id} onClick={()=>openContact(c)} style={{...cardStyle,display:"flex",gap:10,alignItems:"flex-start",marginBottom:8,cursor:"pointer",position:"relative"}}>
+              <input type="checkbox" checked={selected.includes(c.id)} onChange={()=>toggleSelect(c.id)} onClick={e=>e.stopPropagation()} style={{marginTop:3,flexShrink:0}}/>
+              <Avatar name={c.contactName} size={32}/>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:2}}>
+                  <span title={c.notes?"Has research notes":"No research notes yet"} style={{display:"inline-block",width:6,height:6,borderRadius:"50%",flexShrink:0,background:c.notes?"#1D9E75":"transparent",border:c.notes?"none":"1px solid var(--color-border-secondary)"}}/>
+                  <span style={{fontSize:13,fontWeight:500,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.company}</span>
+                </div>
+                <div style={{fontSize:11,color:"var(--color-text-secondary)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",marginBottom:6}}>{c.contactName}{c.title?` · ${c.title}`:""}</div>
+                <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:5,marginBottom:(c.frameworks||[]).length||(c.tags||[]).length?5:0}}>
+                  <StagePill stage={c.stage} small/>
+                  <span style={{fontSize:10,color:"var(--color-text-secondary)"}}>{c.source}</span>
+                  <span style={{fontSize:10,color:isOverdue(c.followUpDate)?"#A32D2D":"var(--color-text-tertiary)",fontWeight:isOverdue(c.followUpDate)?500:400,marginLeft:"auto"}}>{c.followUpDate?`Follow-up ${daysAgo(c.followUpDate)}`:""}</span>
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:3}}>
+                  {(c.frameworks||[]).slice(0,2).map(f=><span key={f} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#EEEDFE",color:"#3C3489"}}>{f}</span>)}
+                  {(c.tags||[]).filter(t=>t!=="framework"&&!t.startsWith("tier-")).slice(0,2).map(t=><span key={t} style={{fontSize:9,padding:"1px 5px",borderRadius:8,background:"#E6F1FB",color:"#0C447C"}}>{t}</span>)}
+                </div>
+              </div>
+            </div>
+          ))}
+          {contacts.length===0&&<div style={{textAlign:"center",padding:"32px 0",color:"var(--color-text-tertiary)",fontSize:12}}>No contacts match your filters.</div>}
+        </div>
       ) : (
-      <div style={{overflowX:"auto"}}>
+      <div className="hc-table-wrap" style={{overflowX:"auto"}}>
         <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,tableLayout:"fixed"}}>
           <thead><tr style={{borderBottom:"0.5px solid var(--color-border-tertiary)"}}>
             <th style={{width:28,padding:"5px 8px"}}><input type="checkbox" checked={allSelected} onChange={toggleAll}/></th>
@@ -827,17 +897,17 @@ function ContactProfile({contact,updateContact,moveStage,newActivity,setNewActiv
   };
   return (
     <div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+      <div className="hc-profile-header" style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <button style={btnStyle} onClick={()=>setView("contacts")}>← Back</button>
         <span style={{fontSize:11,color:"var(--color-text-secondary)"}}>Contacts / {contact.company}</span>
-        <div style={{marginLeft:"auto",display:"flex",gap:7}}>
+        <div style={{marginLeft:"auto",display:"flex",gap:7,flexWrap:"wrap"}}>
           <button style={btnStyle} onClick={()=>setModal({type:"editContact",contact})}>Edit</button>
           <button style={{...btnStyle,color:"#A32D2D",borderColor:"#F09595"}} onClick={handleDelete}>Delete</button>
           <select value={contact.stage} onChange={e=>moveStage(contact.id,e.target.value)} style={{...inputStyle,fontSize:11}}>{STAGES.map(s=><option key={s} value={s}>{s}</option>)}</select>
         </div>
       </div>
-      <div style={{display:"flex",gap:14,alignItems:"flex-start"}}>
-        <div style={{width:224,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
+      <div className="hc-profile-layout" style={{display:"flex",gap:14,alignItems:"flex-start"}}>
+        <div className="hc-profile-aside" style={{width:224,flexShrink:0,display:"flex",flexDirection:"column",gap:10}}>
           <div style={cardStyle}>
             <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:12}}>
               <Avatar name={contact.contactName} size={44}/>
@@ -963,7 +1033,7 @@ function AddContactModal({onClose,onSave,prefillStage,edit,contact,currentUserEm
   return (
     <Modal onClose={onClose}>
       <div style={{fontSize:15,fontWeight:500,marginBottom:16}}>{edit?"Edit contact":"Add contact"}</div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+      <div className="hc-modal-grid" style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
         {[["Company","company"],["Contact name","contactName"],["Job title","title"],["Email","email"],["Phone","phone"],["LinkedIn URL","linkedin"],["Location","location"],["Website","website"],["Current supplier","currentSupplier"],["Contract end (e.g. 2026-09)","contractEnd"],["Industry","industry"]].map(([l,k])=>(
           <div key={k}><div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{l}</div><input value={form[k]||""} onChange={e=>set(k,e.target.value)} style={{...inputStyle,width:"100%"}}/></div>
         ))}
@@ -1034,6 +1104,7 @@ const PersonIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"
 const DocIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><rect x="3" y="1" width="10" height="14" rx="1.5" stroke="currentColor" strokeWidth="1.3"/><path d="M6 5h4M6 8h4M6 11h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>;
 const StarIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><path d="M8 1.5l2 4.2 4.5.6-3.3 3.2.8 4.5L8 11.8l-4 2.2.8-4.5-3.3-3.2 4.5-.6z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round"/></svg>;
 const TargetIcon=()=><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.5" stroke="currentColor" strokeWidth="1.2"/><circle cx="8" cy="8" r="3.3" stroke="currentColor" strokeWidth="1.2"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/></svg>;
+const MenuIcon=()=><svg width="18" height="18" viewBox="0 0 16 16" fill="none"><path d="M2 4h12M2 8h12M2 12h12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>;
 
 function parseContractEnd(s){
   if(!s) return null;
@@ -1053,7 +1124,7 @@ function ClientsView({contacts,openContact}){
   const renewalsDue = clients.filter(c=>isRenewalDueSoon(c.contractEnd));
   return (
     <div>
-      <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginBottom:16}}>
+      <div className="hc-stats-grid" style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10,marginBottom:16}}>
         {[{label:"Active clients",value:clients.length},{label:"Total active value",value:formatGBP(totalValue)},{label:"Renewals due (60d)",value:renewalsDue.length,warn:renewalsDue.length>0}].map((m,i)=>(
           <div key={i} style={{background:"var(--color-background-secondary)",borderRadius:8,padding:"11px 14px"}}>
             <div style={{fontSize:11,color:"var(--color-text-secondary)",marginBottom:3}}>{m.label}</div>
